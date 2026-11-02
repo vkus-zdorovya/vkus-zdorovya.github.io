@@ -1,0 +1,7 @@
+User-agent: *
+Disallow: /admin.html
+Disallow: /account.html
+Disallow: /messages.html
+Disallow: /login.html
+
+Sitemap: https://vkus-zdorovya.github.io/sitemap.xml
