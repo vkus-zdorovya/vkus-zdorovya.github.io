@@ -67,7 +67,7 @@
   }
 
   function asText() {
-    return 'Список покупок — Укропчик\n\n' + Object.entries(current.groups).map(([cat, items]) =>
+    return 'Список покупок — ВкусЗдоровья\n\n' + Object.entries(current.groups).map(([cat, items]) =>
       `${cat}:\n` + Object.entries(items).map(([name, item]) => `${checked[name] ? '✓' : '•'} ${name} — ${qty(item)}`).join('\n')
     ).join('\n\n');
   }

@@ -34,7 +34,7 @@
     [/invalid login credentials/i, 'Неверная почта или пароль'],
     [/already registered|already exists/i, 'Пользователь с такой почтой уже зарегистрирован'],
     [/password should be at least/i, 'Пароль слишком короткий — минимум 6 символов'],
-    [/email not confirmed/i, 'Почта не подтверждена. Введите код из письма от Укропчика'],
+    [/email not confirmed/i, 'Почта не подтверждена. Введите код из письма от «ВкусЗдоровья»'],
     [/token has expired|otp.*(expired|invalid)|invalid.*otp/i, 'Код неверный или устарел. Запросите новый'],
     [/only request this after|security purposes/i, 'Код уже отправлен. Повторно запросить можно через минуту'],
     [/signups not allowed for otp|user not found/i, 'Аккаунт с такой почтой не найден'],
@@ -217,13 +217,13 @@
     const now = Date.now();
     store.set('forum_posts', [
       {
-        id: 'seed1', topic: 'Рецепты', author_id: 'team', author_name: 'Команда Укропчика',
+        id: 'seed1', topic: 'Рецепты', author_id: 'team', author_name: 'Команда «ВкусЗдоровья»',
         title: 'Делимся быстрыми полезными завтраками',
         body: 'Расскажите, что вы едите утром, если на готовку есть 10 минут. Начнём: овсянка на воде с ягодами и горстью орехов.',
         created_at: new Date(now - 86400000 * 2).toISOString(),
       },
       {
-        id: 'seed2', topic: 'Вопросы', author_id: 'team', author_name: 'Команда Укропчика',
+        id: 'seed2', topic: 'Вопросы', author_id: 'team', author_name: 'Команда «ВкусЗдоровья»',
         title: 'Как пользоваться конструктором рациона',
         body: 'Укажите норму калорий (её можно посчитать в калькуляторе), нажмите «Подобрать автоматически» и поправьте продукты под себя. Готовый рацион можно сохранить в аккаунте.',
         created_at: new Date(now - 86400000).toISOString(),

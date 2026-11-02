@@ -56,8 +56,8 @@
     header.className = 'site-header';
     header.innerHTML = `
       <div class="container">
-        <a class="logo" href="index.html" aria-label="Укропчик — на главную">
-          <img src="img/logo.svg" alt="" width="40" height="40"><span>Укропчик</span>
+        <a class="logo" href="index.html" aria-label="ВкусЗдоровья — на главную">
+          <img src="img/logo.svg" alt="" width="40" height="40"><span>ВкусЗдоровья</span>
         </a>
         <nav class="nav" id="nav" aria-label="Основное меню">${links}</nav>
         <button class="icon-btn theme-btn" type="button" id="theme-btn"></button>
@@ -119,11 +119,11 @@
     footer.innerHTML = `
       <div class="container footer-grid">
         <div class="footer-brand">
-          <a class="logo" href="index.html"><img src="img/logo.svg" alt="" width="72" height="72"><span>Укропчик</span></a>
+          <a class="logo" href="index.html"><img src="img/logo.svg" alt="" width="72" height="72"><span>ВкусЗдоровья</span></a>
           <p>Ваш надежный помощник в мире здорового питания.</p>
           <div class="socials">
-            <a class="social" href="https://vk.ru/ykropchikoffc" target="_blank" rel="noopener" aria-label="Укропчик ВКонтакте">VK</a>
-            <a class="social" href="https://t.me/+BkpTLZr-AuQ0MTNi" target="_blank" rel="noopener" aria-label="Укропчик в Telegram">TG</a>
+            <a class="social" href="https://vk.ru/ykropchikoffc" target="_blank" rel="noopener" aria-label="ВкусЗдоровья ВКонтакте">VK</a>
+            <a class="social" href="https://t.me/+BkpTLZr-AuQ0MTNi" target="_blank" rel="noopener" aria-label="ВкусЗдоровья в Telegram">TG</a>
           </div>
         </div>
         <div>
@@ -142,7 +142,7 @@
           <h4>Юридическая информация</h4>
           <p>ИНН: ________</p>
           <p>ОГРН: ________</p>
-          <p class="footer-copy">© ${new Date().getFullYear()} Укропчик<br>Все права защищены</p>
+          <p class="footer-copy">© ${new Date().getFullYear()} ВкусЗдоровья<br>Все права защищены</p>
         </div>
       </div>`;
   }
@@ -250,7 +250,7 @@
     const bar = document.createElement('div');
     bar.className = 'install-bar';
     bar.innerHTML = `<img src="img/icon-192.png" alt="">
-      <div><b>Установить Укропчик</b><br><span class="muted">Как приложение на экран телефона</span></div>
+      <div><b>Установить «ВкусЗдоровья»</b><br><span class="muted">Как приложение на экран телефона</span></div>
       <button class="btn btn-primary btn-sm" type="button" data-install>Установить</button>
       <button class="icon-btn" type="button" data-close aria-label="Закрыть">✕</button>`;
     bar.querySelector('[data-install]').addEventListener('click', () => { install(); bar.remove(); });

@@ -220,7 +220,7 @@
           </div>
           <div class="post-body">${esc(m.message)}</div>
           <div class="post-foot">
-            <a class="btn btn-ghost btn-sm" href="mailto:${esc(m.email)}?subject=${encodeURIComponent('Укропчик: ответ на ваше сообщение')}">Ответить на почту</a>
+            <a class="btn btn-ghost btn-sm" href="mailto:${esc(m.email)}?subject=${encodeURIComponent('ВкусЗдоровья: ответ на ваше сообщение')}">Ответить на почту</a>
             <button class="btn btn-danger btn-sm" type="button" data-del-msg>Удалить</button>
           </div>
         </article>`).join('') : '<div class="card muted center">Сообщений нет.</div>';

@@ -18,7 +18,7 @@
     }
     document.querySelectorAll('[data-panel]').forEach((p) => p.classList.toggle('hidden', p.dataset.panel !== step));
     document.querySelectorAll('.step').forEach((s) => s.classList.toggle('active', s.dataset.step === step));
-    document.title = { login: 'Вход в аккаунт', register: 'Регистрация', confirm: 'Подтверждение почты', plan: 'Выбор плана', recovery: 'Новый пароль' }[step] + ' — Укропчик';
+    document.title = { login: 'Вход в аккаунт', register: 'Регистрация', confirm: 'Подтверждение почты', plan: 'Выбор плана', recovery: 'Новый пароль' }[step] + ' — ВкусЗдоровья';
 
     if (step === 'plan') document.getElementById('plan-current').textContent = user.plan === 'personal' ? 'Персональный' : 'Базовый';
   }

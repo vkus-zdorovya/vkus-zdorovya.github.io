@@ -2,7 +2,7 @@
  * Service worker: сайт открывается без интернета и быстрее загружается.
  * При изменении файлов сайта увеличьте номер версии — пользователи получат обновление.
  */
-const VERSION = 'ukropchik-v9';
+const VERSION = 'ukropchik-v10';
 const ASSETS = [
   './', 'index.html', 'calculator.html', 'diet.html', 'recipes.html', 'diary.html', 'shopping.html',
   'scanner.html', 'forum.html', 'account.html', 'login.html', 'admin.html',
