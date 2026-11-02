@@ -886,6 +886,23 @@
     },
   };
 
+  /* поиск участников по нику (без почты) */
+  async function searchUsers(q) {
+    const term = String(q || '').trim();
+    if (term.length < 2) return [];
+    let rows;
+    if (useSupabase) {
+      rows = await run(sb.rpc('search_profiles', { q: term }));
+    } else {
+      const posts = store.get('forum_posts', []);
+      rows = Object.values(store.get('users', {}))
+        .filter((u) => (u.name || '').toLowerCase().includes(term.toLowerCase()))
+        .slice(0, 20)
+        .map((u) => ({ ...u, posts: posts.filter((p) => p.author_id === u.id).length }));
+    }
+    return rows.map((r) => ({ id: r.id, name: r.name, avatar_url: avatarUrl(r.avatar_url), created_at: r.created_at || null, posts: r.posts || 0 }));
+  }
+
   window.DB = {
     mode: useSupabase ? 'supabase' : 'demo',
     store,
@@ -898,6 +915,7 @@
     profile: useSupabase ? remoteProfile : localProfile,
     dm: useSupabase ? remoteDm : localDm,
     publicProfiles,
+    searchUsers,
     checkText,
     async isCloud() { return Boolean(await remoteUserId()); },
   };

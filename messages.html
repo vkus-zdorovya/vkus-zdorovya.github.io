@@ -19,6 +19,7 @@
   <script defer src="js/db.js"></script>
   <script defer src="js/data.js"></script>
   <script defer src="js/main.js"></script>
+  <script defer src="js/user-search.js"></script>
   <script defer src="js/messages.js"></script>
 </head>
 <body>
@@ -35,7 +36,7 @@
       <div class="dm-layout hidden" id="dm">
         <aside class="card dm-list">
           <h1 class="dm-title">Сообщения</h1>
-          <p class="small muted">Чтобы начать переписку, откройте профиль участника на <a href="forum.html">форуме</a> и нажмите «✉️ Написать».</p>
+          <div data-user-search data-mode="dm" data-placeholder="🔍 Найти, кому написать"></div>
           <div id="dm-conversations"><p class="muted small">Загрузка…</p></div>
         </aside>
 

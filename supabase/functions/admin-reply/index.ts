@@ -21,7 +21,7 @@ Deno.serve(async (req) => {
     if (!user || !pass) return json({ error: 'Не заданы секреты GMAIL_USER и GMAIL_APP_PASSWORD' }, 500);
 
     // запрос выполняется от имени вошедшего администратора — права проверяет база
-    const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
+    const db = createClient(Deno.env.get('SUPABASE_URL')!, (Deno.env.get('SUPABASE_ANON_KEY') ?? Deno.env.get('SUPABASE_PUBLISHABLE_KEY'))!, {
       global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } },
     });
     const { data: isAdmin } = await db.rpc('is_admin');

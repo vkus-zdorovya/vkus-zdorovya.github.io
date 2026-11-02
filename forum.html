@@ -19,6 +19,7 @@
   <script defer src="js/db.js"></script>
   <script defer src="js/data.js"></script>
   <script defer src="js/main.js"></script>
+  <script defer src="js/user-search.js"></script>
   <script defer src="js/forum.js"></script>
 </head>
 <body>
@@ -45,7 +46,12 @@
           <div class="posts" id="posts" aria-live="polite"><p class="muted">Загрузка…</p></div>
         </div>
 
-        <aside class="card" id="new-post-box">
+        <aside class="forum-side">
+          <section class="card people-card">
+            <h3>Участники</h3>
+            <div data-user-search data-placeholder="🔍 Найти по нику"></div>
+          </section>
+          <div class="card" id="new-post-box">
           <h3>Новая тема</h3>
           <div id="new-post-auth" class="hidden">
             <p class="form-note">Чтобы создавать темы и отвечать, <a href="login.html">войдите</a> или <a href="login.html#register">зарегистрируйтесь</a>.</p>
@@ -66,6 +72,7 @@
             <p class="form-error" role="alert"></p>
             <button class="btn btn-primary btn-block" type="submit">Опубликовать</button>
           </form>
+          </div>
         </aside>
       </div>
     </section>

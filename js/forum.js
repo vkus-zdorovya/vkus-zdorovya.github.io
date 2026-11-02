@@ -17,7 +17,14 @@
   function author(item) {
     const info = authors[item.author_id] || {};
     const name = info.name || item.author_name;
-    return `<a class="post-author" href="profile.html?id=${encodeURIComponent(item.author_id)}">${UI.avatarHtml(name, info.avatar_url, 'avatar-md zoomable')}${esc(name)}</a>`;
+    const href = `profile.html?id=${encodeURIComponent(item.author_id)}`;
+    return `<div class="author-line">
+      <a class="author-avatar" href="${href}" aria-hidden="true" tabindex="-1">${UI.avatarHtml(name, info.avatar_url, 'avatar-md zoomable')}</a>
+      <div class="author-text">
+        <a class="author-name" href="${href}">${esc(name)}</a>
+        <time class="author-date" datetime="${esc(item.created_at)}">${formatDate(item.created_at)}</time>
+      </div>
+    </div>`;
   }
   const isAdmin = () => user && user.role === 'admin';
   const isMuted = () => user && user.muted_until && new Date(user.muted_until) > new Date();
@@ -50,12 +57,11 @@
     }
     postsEl.innerHTML = list.map((p) => `
       <article class="card post${p.pinned ? ' pinned' : ''}" data-id="${p.id}">
-        <h3>${p.pinned ? '<span class="pin-mark" title="Закреплено">📌</span> ' : ''}${esc(p.title)}</h3>
-        <div class="post-meta">
-          <span class="badge">${esc(p.topic || 'Общее')}</span>
+        <div class="post-head">
           ${author(p)}
-          <span>${formatDate(p.created_at)}</span>
+          <div class="post-tags">${p.pinned ? '<span class="badge badge-pin">📌 Закреплено</span>' : ''}<span class="badge">${esc(p.topic || 'Общее')}</span></div>
         </div>
+        <h3>${esc(p.title)}</h3>
         <div class="post-body${isLong(p.body) ? ' clamped' : ''}">${esc(p.body)}</div>
         ${isLong(p.body) ? '<button class="link-btn" type="button" data-expand>Показать полностью</button>' : ''}
         <div class="post-foot">
@@ -81,7 +87,7 @@
       card.replyList = replies;
       box.innerHTML = replies.map((r) => `
         <div class="reply${r.pinned ? ' pinned' : ''}">
-          <div class="post-meta">${author(r)}<span>${formatDate(r.created_at)}</span>${r.pinned ? '<span class="badge">📌 Закреплён</span>' : ''}</div>
+          <div class="post-head">${author(r)}${r.pinned ? '<div class="post-tags"><span class="badge badge-pin">📌 Закреплён</span></div>' : ''}</div>
           <div class="post-body">${esc(r.body)}</div>
           <div class="reply-actions">
             ${isAdmin() ? `<button class="link-btn" type="button" data-pin-reply="${r.id}">${r.pinned ? 'Открепить' : '📌 Закрепить'}</button>` : ''}

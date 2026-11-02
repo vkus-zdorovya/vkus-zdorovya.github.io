@@ -23,7 +23,7 @@
   <header id="site-header"></header>
 
   <main>
-    <section class="page-head">
+    <section class="page-head page-head-compact">
       <div class="container">
         <h1>Админ-панель</h1>
       </div>
@@ -55,14 +55,14 @@
 
       <!-- панель -->
       <div class="hidden" id="panel">
-        <div class="diet-actions" style="justify-content:space-between;align-items:center">
-          <div class="segmented" id="admin-tabs" role="tablist">
-            <button type="button" data-tab="overview" class="active">Обзор</button>
-            <button type="button" data-tab="users">Пользователи</button>
-            <button type="button" data-tab="avatars">Фото <span id="avatars-count"></span></button>
-            <button type="button" data-tab="forum">Форум</button>
-            <button type="button" data-tab="words">Слова</button>
-            <button type="button" data-tab="messages">Сообщения</button>
+        <div class="admin-bar">
+          <div class="segmented admin-tabs" id="admin-tabs" role="tablist">
+            <button type="button" data-tab="overview" class="active">📊 Обзор</button>
+            <button type="button" data-tab="users">👥 Пользователи</button>
+            <button type="button" data-tab="avatars">🖼 Фото <span id="avatars-count"></span></button>
+            <button type="button" data-tab="forum">💬 Форум</button>
+            <button type="button" data-tab="words">🚫 Слова</button>
+            <button type="button" data-tab="messages">📩 Сообщения</button>
           </div>
           <button class="btn btn-ghost btn-sm" type="button" id="admin-exit">Выйти из режима администратора</button>
         </div>

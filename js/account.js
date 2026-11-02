@@ -64,7 +64,7 @@
             <input type="file" id="banner-file" accept="image/jpeg,image/png,image/webp,image/gif" class="sr-only">
             ${(user.banner_url || user.banner_pending) ? '<button class="btn btn-ghost" type="button" data-remove="banner">Удалить баннер</button>' : ''}
           </div>
-          <span class="small muted">Широкая картинка вверху профиля, лучше 1500×500. Можно GIF до 5 МБ. ${user.role === 'admin' ? 'Появится сразу.' : 'Тоже проходит проверку.'}</span>
+          <span class="small muted">Широкая картинка вверху профиля в пропорции 4:1, лучше 2400×600 — края по бокам обрежутся автоматически. Можно GIF до 5 МБ. ${user.role === 'admin' ? 'Появится сразу.' : 'Тоже проходит проверку.'}</span>
         </div>
       </div>`;
 
@@ -116,7 +116,7 @@
         try {
           const blob = file.type === 'image/gif'
             ? file
-            : await cropImage(file, kind === 'avatar' ? 256 : 1500, kind === 'avatar' ? 256 : 500);
+            : await cropImage(file, kind === 'avatar' ? 512 : 2400, kind === 'avatar' ? 512 : 600);
           const result = await DB.profile.requestMedia(kind, blob);
           if (result === 'approved') {
             toast(kind === 'avatar' ? 'Фото обновлено' : 'Баннер обновлён');
@@ -156,20 +156,26 @@
     });
   }
 
-  /* обрезаем картинку под нужные пропорции и уменьшаем — так она весит десятки КБ */
-  function cropImage(file, width, height) {
+  /* обрезаем картинку под нужные пропорции; маленькие картинки не растягиваем, чтобы не было мыла */
+  function cropImage(file, maxWidth, maxHeight) {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
-        const scale = Math.max(width / img.width, height / img.height);
-        const sw = width / scale;
-        const sh = height / scale;
+        const ratio = maxWidth / maxHeight;
+        // самый большой кусок нужной пропорции из центра картинки
+        let sw = img.width;
+        let sh = sw / ratio;
+        if (sh > img.height) { sh = img.height; sw = sh * ratio; }
+        const width = Math.round(Math.min(maxWidth, sw));
+        const height = Math.round(width / ratio);
         const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
-        canvas.getContext('2d').drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, 0, 0, width, height);
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, 0, 0, width, height);
         URL.revokeObjectURL(img.src);
-        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('canvas'))), 'image/jpeg', 0.85);
+        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('canvas'))), 'image/jpeg', 0.9);
       };
       img.onerror = reject;
       img.src = URL.createObjectURL(file);

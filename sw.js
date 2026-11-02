@@ -2,14 +2,14 @@
  * Service worker: сайт открывается без интернета и быстрее загружается.
  * При изменении файлов сайта увеличьте номер версии — пользователи получат обновление.
  */
-const VERSION = 'ukropchik-v14';
+const VERSION = 'ukropchik-v15';
 const ASSETS = [
   './', 'index.html', 'calculator.html', 'diet.html', 'recipes.html', 'diary.html', 'shopping.html',
   'scanner.html', 'forum.html', 'account.html', 'login.html', 'admin.html', 'profile.html', 'messages.html',
   'css/style.css',
   'js/theme.js', 'js/config.js', 'js/db.js', 'js/data.js', 'js/recipes-data.js', 'js/plan.js', 'js/main.js',
   'js/home.js', 'js/calculator.js', 'js/diet.js', 'js/recipes.js', 'js/diary.js', 'js/shopping.js',
-  'js/scanner.js', 'js/forum.js', 'js/account.js', 'js/auth.js', 'js/admin.js', 'js/profile.js', 'js/messages.js', 'js/vendor/supabase.js',
+  'js/scanner.js', 'js/forum.js', 'js/account.js', 'js/auth.js', 'js/admin.js', 'js/profile.js', 'js/messages.js', 'js/user-search.js', 'js/vendor/supabase.js',
   'img/logo.svg', 'img/family.jpg', 'img/plate.jpg', 'img/icon-192.png', 'img/icon-512.png',
   'manifest.webmanifest', 'fonts/inter-cyrillic-wght-normal.woff2', 'fonts/inter-latin-wght-normal.woff2',
 ];

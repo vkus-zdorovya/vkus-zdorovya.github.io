@@ -69,7 +69,7 @@
     return guard(box, async () => {
       const s = await DB.admin.stats();
       const tiles = [
-        ['👥 Пользователей', s.users, `новых за неделю: ${s.new_week}`],
+        ['👥 Пользователей', s.users, `+${s.new_week} за неделю`],
         ['✅ Подтвердили почту', s.confirmed, ''],
         ['💬 Тем на форуме', s.posts, `ответов: ${s.replies}`],
         ['🗓 Сохранённых рационов', s.rations, ''],
@@ -79,9 +79,13 @@
         ['🔇 Замученных', s.muted || 0, ''],
       ];
       $('avatars-count').textContent = s.avatars_pending ? `(${s.avatars_pending})` : '';
-      box.innerHTML = tiles.map(([label, value, note]) => `
-        <div class="stat"><div class="stat-label">${label}</div><div class="stat-value">${Number(value).toLocaleString('ru-RU')}</div>
-        <div class="stat-note muted">${note}</div></div>`).join('');
+      box.innerHTML = tiles.map(([label, value, note]) => {
+        const [icon, ...words] = label.split(' ');
+        return `<div class="stat admin-stat">
+          <span class="admin-stat-icon" aria-hidden="true">${icon}</span>
+          <div><div class="stat-label">${words.join(' ')}</div><div class="stat-value">${Number(value || 0).toLocaleString('ru-RU')}</div>
+          ${note ? `<div class="stat-note muted">${note}</div>` : ''}</div></div>`;
+      }).join('');
     });
   }
 
@@ -95,7 +99,7 @@
         <tr><th>Имя</th><th>Почта</th><th>Роль</th><th>Мут</th><th>Регистрация</th><th>Последний вход</th><th></th></tr>
         ${list.map((u) => `
           <tr data-id="${esc(u.id)}">
-            <td>${esc(u.name || '—')}</td>
+            <td><a class="post-author" href="profile.html?id=${encodeURIComponent(u.id)}" target="_blank" rel="noopener">${UI.avatarHtml(u.name || u.email, avatars[u.id] && avatars[u.id].avatar_url, 'avatar-sm')}${esc(u.name || '—')}</a></td>
             <td>${esc(u.email)} ${u.confirmed ? '' : '<span class="tag" title="Почта не подтверждена">не подтв.</span>'}</td>
             <td>${u.role === 'admin' ? '<span class="tag">админ</span>' : 'пользователь'}</td>
             <td>${isMuted(u)
@@ -118,11 +122,15 @@
       </table>` : '<p class="muted">Никого не найдено.</p>';
   }
 
+  const avatars = {};
   const isMuted = (u) => u.muted_until && new Date(u.muted_until) > new Date();
 
   function loadUsers() {
     return guard($('users'), async () => {
       users = await DB.admin.users();
+      renderUsers();
+      // аватарки подгружаем отдельно, чтобы таблица появилась сразу
+      Object.assign(avatars, await DB.publicProfiles(users.map((u) => u.id)).catch(() => ({})));
       renderUsers();
     });
   }

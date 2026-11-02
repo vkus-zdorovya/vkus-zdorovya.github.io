@@ -27,7 +27,7 @@
 
     list.innerHTML = found.length ? found.map((r) => `
       <button type="button" class="recipe" data-id="${r.id}">
-        <div class="recipe-art" aria-hidden="true">${r.emoji}</div>
+        <div class="recipe-art" aria-hidden="true"><img src="img/recipes/${r.id}.webp" alt="" loading="lazy" onerror="this.replaceWith(document.createTextNode('${r.emoji}'))"></div>
         <div class="recipe-info">
           <h3>${esc(r.title)}</h3>
           <div class="recipe-meta"><span>⏱ ${r.time} мин</span><span>🔥 ${r.total.kcal} ккал</span><span>${window.MEAL_NAMES[r.meal]}</span></div>
@@ -43,7 +43,7 @@
     const draft = getDraft();
     const week = draft.mode === 'week';
     detail.innerHTML = `
-      <div class="recipe-art" aria-hidden="true">${r.emoji}</div>
+      <div class="recipe-art" aria-hidden="true"><img src="img/recipes/${r.id}.webp" alt="" onerror="this.replaceWith(document.createTextNode('${r.emoji}'))"></div>
       <h2 id="rm-title">${esc(r.title)}</h2>
       <div class="recipe-meta"><span>⏱ ${r.time} мин</span><span>⚖️ порция ${r.portion} г</span><span>${window.MEAL_NAMES[r.meal]}</span></div>
       <div class="tags" style="margin-top:10px">${r.tags.map((t) => `<span class="tag">${TAGS[t]}</span>`).join('')}</div>
