@@ -45,7 +45,7 @@
 
   /* ---------- вкладки ---------- */
 
-  const loaders = { overview: loadStats, users: loadUsers, forum: loadForum, messages: loadMessages };
+  const loaders = { overview: loadStats, users: loadUsers, avatars: loadAvatars, forum: loadForum, messages: loadMessages };
   $('admin-tabs').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-tab]');
     if (!btn) return;
@@ -75,7 +75,9 @@
         ['🗓 Сохранённых рационов', s.rations, ''],
         ['📔 Записей в дневниках', s.diary, ''],
         ['📩 Сообщений с сайта', s.messages, ''],
+        ['🖼 Фото на проверке', s.avatars_pending || 0, ''],
       ];
+      $('avatars-count').textContent = s.avatars_pending ? `(${s.avatars_pending})` : '';
       box.innerHTML = tiles.map(([label, value, note]) => `
         <div class="stat"><div class="stat-label">${label}</div><div class="stat-value">${Number(value).toLocaleString('ru-RU')}</div>
         <div class="stat-note muted">${note}</div></div>`).join('');
@@ -89,15 +91,11 @@
     const list = users.filter((u) => !q || (u.name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q));
     $('users').innerHTML = list.length ? `
       <table class="table">
-        <tr><th>Имя</th><th>Почта</th><th>План</th><th>Роль</th><th>Регистрация</th><th>Последний вход</th><th></th></tr>
+        <tr><th>Имя</th><th>Почта</th><th>Роль</th><th>Регистрация</th><th>Последний вход</th><th></th></tr>
         ${list.map((u) => `
           <tr data-id="${esc(u.id)}">
             <td>${esc(u.name || '—')}</td>
             <td>${esc(u.email)} ${u.confirmed ? '' : '<span class="tag" title="Почта не подтверждена">не подтв.</span>'}</td>
-            <td><select class="select" data-plan style="min-height:36px;padding:4px 36px 4px 10px">
-              <option value="basic"${u.plan === 'basic' ? ' selected' : ''}>Базовый</option>
-              <option value="personal"${u.plan === 'personal' ? ' selected' : ''}>Персональный</option>
-            </select></td>
             <td>${u.role === 'admin' ? '<span class="tag">админ</span>' : 'пользователь'}</td>
             <td>${fmt(u.created_at)}</td>
             <td>${fmt(u.last_sign_in_at)}</td>
@@ -117,18 +115,6 @@
 
   $('user-search').addEventListener('input', renderUsers);
 
-  $('users').addEventListener('change', async (e) => {
-    const sel = e.target.closest('[data-plan]');
-    if (!sel) return;
-    const id = sel.closest('tr').dataset.id;
-    try {
-      await DB.admin.setPlan(id, sel.value);
-      toast('План изменён');
-    } catch (error) {
-      toast(error.message, 'error');
-    }
-  });
-
   $('users').addEventListener('click', async (e) => {
     const row = e.target.closest('tr');
     if (!row) return;
@@ -146,6 +132,40 @@
         toast('Пользователь удалён');
         loadUsers();
       }
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  });
+
+  /* ---------- проверка фото ---------- */
+
+  function loadAvatars() {
+    const box = $('avatar-requests');
+    return guard(box, async () => {
+      const list = await DB.admin.avatarRequests();
+      $('avatars-count').textContent = list.length ? `(${list.length})` : '';
+      box.innerHTML = list.length ? list.map((r) => `
+        <div class="card avatar-request" data-id="${esc(r.id)}">
+          <span class="avatar avatar-lg"><img src="${esc(r.pending_url)}" alt="Новое фото"></span>
+          <div><b>${esc(r.name || '—')}</b><br><span class="small muted">${esc(r.email)}</span></div>
+          ${r.current_url ? `<div class="small muted post-author">Сейчас: <span class="avatar avatar-sm"><img src="${esc(r.current_url)}" alt=""></span></div>` : ''}
+          <div class="inline-form" style="justify-content:center">
+            <button class="btn btn-primary btn-sm" type="button" data-approve>✓ Одобрить</button>
+            <button class="btn btn-danger btn-sm" type="button" data-reject>✕ Отклонить</button>
+          </div>
+        </div>`).join('') : '<div class="card muted center" style="grid-column:1/-1">Новых фото нет.</div>';
+    });
+  }
+
+  $('avatar-requests').addEventListener('click', async (e) => {
+    const card = e.target.closest('.avatar-request');
+    const approve = e.target.closest('[data-approve]');
+    const reject = e.target.closest('[data-reject]');
+    if (!card || (!approve && !reject)) return;
+    try {
+      await DB.admin.reviewAvatar(card.dataset.id, Boolean(approve));
+      toast(approve ? 'Фото одобрено' : 'Фото отклонено');
+      loadAvatars();
     } catch (error) {
       toast(error.message, 'error');
     }
@@ -205,37 +225,85 @@
   });
 
   /* ---------- сообщения ---------- */
+  /*
+   * Ответ пишется прямо в админке и открывается в Gmail в браузере
+   * (с ящика сайта) — почтовая программа на компьютере не нужна.
+   */
+
+  let messages = [];
+  const SUBJECT = 'ВкусЗдоровья: ответ на ваше сообщение';
+
+  function gmailLink(m, text) {
+    const quote = `\n\n— — —\n${m.name} писал(а) ${fmt(m.created_at)}:\n${m.message}`;
+    const params = new URLSearchParams({ view: 'cm', fs: '1', to: m.email, su: SUBJECT, body: (text || '') + quote });
+    return 'https://mail.google.com/mail/?' + params.toString();
+  }
 
   function loadMessages() {
     const box = $('messages');
     return guard(box, async () => {
-      const list = await DB.admin.messages();
-      box.innerHTML = list.length ? list.map((m) => `
-        <article class="card post" data-id="${esc(String(m.id))}">
+      messages = await DB.admin.messages();
+      box.innerHTML = messages.length ? messages.map((m) => `
+        <article class="card post${m.answered_at ? ' answered' : ''}" data-id="${esc(String(m.id))}">
           <div class="post-meta">
-            ${/заявка/i.test(m.message) ? '<span class="badge">⭐ Заявка на план</span>' : ''}
+            ${m.answered_at ? `<span class="badge">✓ Отвечено ${fmt(m.answered_at)}</span>` : '<span class="badge">Новое</span>'}
             <span>👤 ${esc(m.name)}</span>
-            <span><a href="mailto:${esc(m.email)}">${esc(m.email)}</a></span>
+            <span>${esc(m.email)}</span>
             <span>${fmt(m.created_at)}</span>
           </div>
           <div class="post-body">${esc(m.message)}</div>
+          <div class="reply-box">
+            <label class="sr-only" for="reply-${esc(String(m.id))}">Текст ответа</label>
+            <textarea class="textarea" id="reply-${esc(String(m.id))}" data-reply-text placeholder="Текст ответа…" style="min-height:90px"></textarea>
+          </div>
           <div class="post-foot">
-            <a class="btn btn-ghost btn-sm" href="mailto:${esc(m.email)}?subject=${encodeURIComponent('ВкусЗдоровья: ответ на ваше сообщение')}">Ответить на почту</a>
+            <button class="btn btn-primary btn-sm" type="button" data-gmail>✉️ Ответить через Gmail</button>
+            <button class="btn btn-ghost btn-sm" type="button" data-copy>Скопировать адрес и текст</button>
+            ${m.answered_at ? '' : '<button class="btn btn-ghost btn-sm" type="button" data-answered>Отметить «Отвечено»</button>'}
             <button class="btn btn-danger btn-sm" type="button" data-del-msg>Удалить</button>
           </div>
         </article>`).join('') : '<div class="card muted center">Сообщений нет.</div>';
     });
   }
 
-  $('messages').addEventListener('click', async (e) => {
-    const card = e.target.closest('.post');
-    if (!card || !e.target.closest('[data-del-msg]') || !confirm('Удалить сообщение?')) return;
+  async function markAnswered(id, silent) {
     try {
-      await DB.admin.deleteMessage(card.dataset.id);
-      toast('Сообщение удалено');
+      await DB.admin.markAnswered(id);
+      if (!silent) toast('Отмечено как отвеченное');
       loadMessages();
     } catch (error) {
       toast(error.message, 'error');
+    }
+  }
+
+  $('messages').addEventListener('click', async (e) => {
+    const card = e.target.closest('.post');
+    if (!card) return;
+    const m = messages.find((x) => String(x.id) === card.dataset.id);
+    const text = card.querySelector('[data-reply-text]').value.trim();
+
+    if (e.target.closest('[data-gmail]')) {
+      window.open(gmailLink(m, text), '_blank', 'noopener');
+      if (!m.answered_at && confirm('Письмо открыто в Gmail. Отметить сообщение как отвеченное?')) markAnswered(m.id, true);
+    }
+    if (e.target.closest('[data-copy]')) {
+      const full = `Кому: ${m.email}\nТема: ${SUBJECT}\n\n${text}`;
+      try {
+        await navigator.clipboard.writeText(full);
+        toast('Адрес, тема и текст скопированы — вставьте в любую почту');
+      } catch {
+        toast(`Адрес: ${m.email}`);
+      }
+    }
+    if (e.target.closest('[data-answered]')) markAnswered(m.id);
+    if (e.target.closest('[data-del-msg]') && confirm('Удалить сообщение?')) {
+      try {
+        await DB.admin.deleteMessage(card.dataset.id);
+        toast('Сообщение удалено');
+        loadMessages();
+      } catch (error) {
+        toast(error.message, 'error');
+      }
     }
   });
 

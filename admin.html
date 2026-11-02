@@ -58,6 +58,7 @@
           <div class="segmented" id="admin-tabs" role="tablist">
             <button type="button" data-tab="overview" class="active">Обзор</button>
             <button type="button" data-tab="users">Пользователи</button>
+            <button type="button" data-tab="avatars">Фото <span id="avatars-count"></span></button>
             <button type="button" data-tab="forum">Форум</button>
             <button type="button" data-tab="messages">Сообщения</button>
           </div>
@@ -73,6 +74,11 @@
             <div class="forum-tools"><input class="input" type="search" id="user-search" placeholder="🔍 Поиск по имени или почте"></div>
             <div class="table-wrap" id="users"></div>
           </div>
+        </div>
+
+        <div data-pane="avatars" class="hidden">
+          <p class="muted">Новые фото профиля появляются на сайте только после одобрения.</p>
+          <div class="avatar-requests" id="avatar-requests"></div>
         </div>
 
         <div data-pane="forum" class="hidden">

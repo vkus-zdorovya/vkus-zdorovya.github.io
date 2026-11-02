@@ -17,13 +17,20 @@
     ['calculator.html', 'Калькулятор'],
     ['recipes.html', 'Рецепты'],
     ['forum.html', 'Форум'],
-    ['index.html#services', 'Услуги'],
   ];
 
   const page = location.pathname.split('/').pop() || 'index.html';
 
   function esc(text) {
     return String(text ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  }
+
+  /* аватарка: одобренное фото или первая буква имени */
+  function avatarHtml(name, url, cls = '') {
+    const letter = esc((String(name || '?').trim()[0] || '?').toUpperCase());
+    return url
+      ? `<span class="avatar ${cls}"><img src="${esc(url)}" alt="" loading="lazy"></span>`
+      : `<span class="avatar ${cls}" aria-hidden="true">${letter}</span>`;
   }
 
   function formatDate(iso) {
@@ -95,7 +102,7 @@
       console.warn(err);
     }
     if (user) {
-      box.innerHTML = `<a class="user-chip" href="account.html" title="${esc(user.email)}">👤 ${esc(user.name)}</a>
+      box.innerHTML = `<a class="user-chip post-author" href="account.html" title="${esc(user.email)}">${avatarHtml(user.name, user.avatar_url, 'avatar-sm')}<span class="chip-name">${esc(user.name)}</span></a>
         <button class="btn btn-ghost btn-sm" type="button" id="logout-btn">Выйти</button>`;
       if (user.role === 'admin') {
         const nav = document.getElementById('nav');
@@ -320,7 +327,7 @@
   scheduleReminder();
 
   window.UI = {
-    esc, toast, formatDate, userReady,
+    esc, toast, formatDate, userReady, avatarHtml,
     setTheme,
     theme: () => DB.store.get('theme') || 'system',
     install, canInstall: () => Boolean(installEvent), isStandalone, isIOS,

@@ -12,6 +12,13 @@
   form.topic.innerHTML = TOPICS.map((t) => `<option>${t}</option>`).join('');
 
   let posts = [];
+  const authors = {};
+  /* автор: актуальный ник и одобренная аватарка, если есть */
+  function author(item) {
+    const info = authors[item.author_id] || {};
+    const name = info.name || item.author_name;
+    return `<span class="post-author">${UI.avatarHtml(name, info.avatar_url, 'avatar-sm')}${esc(name)}</span>`;
+  }
   const isLong = (text) => text.length > 600 || text.split('\n').length > 8;
   const canDelete = (item) => user && (user.id === item.author_id || user.role === 'admin');
   let user = null;
@@ -20,6 +27,7 @@
   async function load() {
     try {
       posts = await DB.forum.list();
+      Object.assign(authors, await DB.publicProfiles(posts.map((p) => p.author_id)));
       render();
     } catch (err) {
       postsEl.innerHTML = `<p class="form-error">${esc(err.message)}</p>`;
@@ -42,7 +50,7 @@
         <h3>${esc(p.title)}</h3>
         <div class="post-meta">
           <span class="badge">${esc(p.topic || 'Общее')}</span>
-          <span>👤 ${esc(p.author_name)}</span>
+          ${author(p)}
           <span>${formatDate(p.created_at)}</span>
         </div>
         <div class="post-body${isLong(p.body) ? ' clamped' : ''}">${esc(p.body)}</div>
@@ -65,9 +73,10 @@
     box.innerHTML = '<p class="muted small">Загрузка…</p>';
     try {
       const replies = await DB.forum.replies(card.dataset.id);
+      Object.assign(authors, await DB.publicProfiles(replies.map((r) => r.author_id)));
       box.innerHTML = replies.map((r) => `
         <div class="reply">
-          <div class="post-meta"><span>👤 ${esc(r.author_name)}</span><span>${formatDate(r.created_at)}</span></div>
+          <div class="post-meta">${author(r)}<span>${formatDate(r.created_at)}</span></div>
           <div class="post-body">${esc(r.body)}</div>
           ${canDelete(r) ? `<button class="link-btn" type="button" data-del-reply="${r.id}">Удалить ответ</button>` : ''}
         </div>`).join('') + (user

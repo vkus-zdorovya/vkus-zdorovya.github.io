@@ -1,7 +1,7 @@
 /* Вход, регистрация, выбор плана, восстановление пароля */
 (function () {
   const { toast, userReady } = window.UI;
-  const STEPS = ['login', 'register', 'confirm', 'plan', 'recovery'];
+  const STEPS = ['login', 'register', 'confirm', 'recovery'];
   let user = null;
   let recovering = /type=recovery/.test(location.hash);
 
@@ -12,22 +12,22 @@
       document.getElementById('confirm-email').textContent = pendingEmail();
       fillConfirmTexts();
     }
-    if (step === 'plan' && !user) {
-      toast('Сначала войдите или зарегистрируйтесь', 'error');
-      step = 'login';
-    }
     document.querySelectorAll('[data-panel]').forEach((p) => p.classList.toggle('hidden', p.dataset.panel !== step));
     document.querySelectorAll('.step').forEach((s) => s.classList.toggle('active', s.dataset.step === step));
-    document.title = { login: 'Вход в аккаунт', register: 'Регистрация', confirm: 'Подтверждение почты', plan: 'Выбор плана', recovery: 'Новый пароль' }[step] + ' — ВкусЗдоровья';
+    document.title = { login: 'Вход в аккаунт', register: 'Регистрация', confirm: 'Подтверждение почты', recovery: 'Новый пароль' }[step] + ' — ВкусЗдоровья';
 
-    if (step === 'plan') document.getElementById('plan-current').textContent = user.plan === 'personal' ? 'Персональный' : 'Базовый';
   }
 
   const route = () => {
     const hash = location.hash.slice(1);
     const step = /access_token|error_description/.test(hash) ? '' : hash;
     if (/error_description/.test(hash)) toast('Ссылка из письма устарела или уже использована. Войдите или запросите новое письмо.', 'error');
-    show(recovering ? 'recovery' : step || (user ? 'plan' : 'login'));
+    // уже вошедшего пользователя отправляем в кабинет
+    if (user && !recovering && !['confirm', 'recovery'].includes(step)) {
+      location.replace('account.html');
+      return;
+    }
+    show(recovering ? 'recovery' : step || 'login');
   };
   window.addEventListener('hashchange', route);
 
@@ -212,37 +212,12 @@
         askForCode(email);
         return;
       }
-      // перезагрузка обновит шапку и откроет шаг выбора плана
-      location.hash = 'plan';
-      location.reload();
+      toast('Аккаунт создан!');
+      location.href = 'calculator.html';
     } catch (error) {
       err.textContent = error.message;
       lock(regForm, false);
     }
-  });
-
-  /* ---------- выбор плана ---------- */
-  document.querySelectorAll('[data-plan]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const plan = btn.dataset.plan;
-      btn.disabled = true;
-      try {
-        await DB.auth.updatePlan(plan);
-        user.plan = plan;
-        if (plan === 'personal') {
-          await DB.contact.send({ name: user.name, email: user.email, message: 'Заявка на персональный план' });
-          toast('Заявка принята! Нутрициолог свяжется с вами по почте.');
-          show('plan');
-        } else {
-          toast('Готово! Начнём с расчёта нормы калорий.');
-          location.href = 'calculator.html';
-        }
-      } catch (error) {
-        toast(error.message, 'error');
-      } finally {
-        btn.disabled = false;
-      }
-    });
   });
 
   /* ---------- новый пароль по ссылке из письма ---------- */
@@ -288,8 +263,8 @@
       }
       await DB.auth.verifySignupCode(email, code);
       DB.store.remove('pending_code');
-      location.hash = 'plan';
-      location.reload();
+      toast('Почта подтверждена, добро пожаловать!');
+      location.href = 'calculator.html';
     } catch (error) {
       err.textContent = error.message;
       lock(confirmForm, false);

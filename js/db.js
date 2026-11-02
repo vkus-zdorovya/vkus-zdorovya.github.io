@@ -44,7 +44,9 @@
     [/rate limit|too many/i, 'Слишком много попыток. Попробуйте через несколько минут'],
     [/failed to fetch|networkerror|load failed/i, 'Нет связи с сервером. Проверьте интернет'],
     [/row-level security|permission denied|нет доступа/i, 'Недостаточно прав для этого действия'],
-    [/could not find the function|function .* does not exist/i, 'Админ-панель ещё не настроена: выполните supabase/schema-3-admin.sql'],
+    [/could not find the function|function .* does not exist/i, 'Функция ещё не настроена в базе: выполните supabase/schema-3-admin.sql и schema-4-profile.sql'],
+    [/bucket not found/i, 'Хранилище аватарок не настроено: выполните supabase/schema-4-profile.sql'],
+    [/payload too large|exceeded the maximum allowed size/i, 'Файл слишком большой — максимум 2 МБ'],
   ];
 
   function humanError(err) {
@@ -81,6 +83,13 @@
 
   /* полный адрес страницы сайта — для ссылок в письмах */
   const pageUrl = (page) => location.href.replace(/[#?].*$/, '').replace(/[^/]*$/, '') + page;
+
+  /* публичная ссылка на файл аватарки в хранилище Supabase */
+  function avatarUrl(path) {
+    if (!path) return null;
+    if (/^(data:|https?:)/.test(path)) return path;
+    return sb ? sb.storage.from('avatars').getPublicUrl(path).data.publicUrl : null;
+  }
 
   const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
@@ -136,6 +145,8 @@
           name: (profile && profile.name) || (u.user_metadata && u.user_metadata.name) || u.email,
           plan: (profile && profile.plan) || 'basic',
           role: (profile && profile.role) || 'user',
+          avatar_url: avatarUrl(profile && profile.avatar_url),
+          avatar_pending: Boolean(profile && profile.avatar_pending),
         };
       },
       async updatePlan(plan) {
@@ -260,7 +271,10 @@
         const key = store.get('session');
         if (!key || !sessionAllowed()) return null;
         const user = store.get('users', {})[key];
-        return user ? { id: user.id, email: user.email, name: user.name, plan: user.plan, role: user.role || 'user' } : null;
+        return user ? {
+          id: user.id, email: user.email, name: user.name, plan: user.plan, role: user.role || 'user',
+          avatar_url: user.avatar_url || null, avatar_pending: Boolean(user.avatar_pending),
+        } : null;
       },
       async updatePlan(plan) {
         const key = store.get('session');
@@ -498,6 +512,7 @@
         posts: store.get('forum_posts', []).length, replies: store.get('forum_replies', []).length,
         rations: store.get('rations', []).length, diary: store.get('diary', []).length,
         messages: store.get('messages', []).length,
+        avatars_pending: users.filter((u) => u.avatar_pending).length,
       };
     },
     async users() {
@@ -535,6 +550,111 @@
     },
   };
 
+  /* ===================== Профиль: ник и аватарка ===================== */
+
+  const remoteProfile = {
+    async updateName(name) {
+      const { data } = await sb.auth.getSession();
+      if (!data || !data.session) throw new Error('Сначала войдите в аккаунт');
+      await run(sb.from('profiles').update({ name }).eq('id', data.session.user.id));
+    },
+    /* фото загружается в хранилище и ждёт одобрения администратора */
+    async requestAvatar(blob) {
+      const { data } = await sb.auth.getSession();
+      if (!data || !data.session) throw new Error('Сначала войдите в аккаунт');
+      const path = `${data.session.user.id}/${newId()}.jpg`;
+      await run(sb.storage.from('avatars').upload(path, blob, { contentType: 'image/jpeg', upsert: false }));
+      await run(sb.rpc('request_avatar', { path }));
+    },
+    async removeAvatar() {
+      await run(sb.rpc('remove_avatar'));
+    },
+  };
+
+  const localProfile = {
+    async updateName(name) {
+      const key = store.get('session');
+      const users = store.get('users', {});
+      if (!key || !users[key]) throw new Error('Сначала войдите в аккаунт');
+      users[key].name = name;
+      store.set('users', users);
+    },
+    async requestAvatar(blob) {
+      const key = store.get('session');
+      const users = store.get('users', {});
+      if (!key || !users[key]) throw new Error('Сначала войдите в аккаунт');
+      users[key].avatar_pending = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(blob);
+      });
+      store.set('users', users);
+    },
+    async removeAvatar() {
+      const key = store.get('session');
+      const users = store.get('users', {});
+      if (users[key]) {
+        users[key].avatar_url = null;
+        users[key].avatar_pending = null;
+        store.set('users', users);
+      }
+    },
+  };
+
+  /* имена и одобренные аватарки авторов (для форума) */
+  async function publicProfiles(ids) {
+    const unique = [...new Set(ids.filter(Boolean))];
+    if (!unique.length) return {};
+    let rows = [];
+    if (useSupabase) {
+      try {
+        rows = await run(sb.rpc('public_profiles', { ids: unique }));
+      } catch {
+        rows = []; // функция ещё не создана — показываем без аватарок
+      }
+    } else {
+      rows = Object.values(store.get('users', {})).filter((u) => unique.includes(u.id));
+    }
+    return Object.fromEntries(rows.map((r) => [r.id, { name: r.name, avatar_url: avatarUrl(r.avatar_url) }]));
+  }
+
+  Object.assign(remoteAdmin, {
+    async avatarRequests() {
+      const rows = await run(sb.rpc('admin_avatar_requests'));
+      return rows.map((r) => ({ ...r, pending_url: avatarUrl(r.avatar_pending), current_url: avatarUrl(r.avatar_url) }));
+    },
+    async reviewAvatar(id, approve) {
+      const path = await run(sb.rpc('admin_review_avatar', { target: id, approve }));
+      // отклонённый файл удаляем из хранилища
+      if (!approve && path) await sb.storage.from('avatars').remove([path]);
+    },
+    async markAnswered(id) {
+      await run(sb.from('contact_messages').update({ answered_at: new Date().toISOString() }).eq('id', id));
+    },
+  });
+
+  Object.assign(localAdmin, {
+    async avatarRequests() {
+      return Object.values(store.get('users', {})).filter((u) => u.avatar_pending).map((u) => ({
+        id: u.id, email: u.email, name: u.name, pending_url: u.avatar_pending, current_url: u.avatar_url || null,
+      }));
+    },
+    async reviewAvatar(id, approve) {
+      const users = store.get('users', {});
+      Object.values(users).forEach((u) => {
+        if (u.id !== id) return;
+        if (approve) u.avatar_url = u.avatar_pending;
+        u.avatar_pending = null;
+      });
+      store.set('users', users);
+    },
+    async markAnswered(id) {
+      const all = store.get('messages', []);
+      if (all[Number(id)]) all[Number(id)].answered_at = new Date().toISOString();
+      store.set('messages', all);
+    },
+  });
+
   window.DB = {
     mode: useSupabase ? 'supabase' : 'demo',
     store,
@@ -544,6 +664,8 @@
     calcs,
     diary,
     admin: useSupabase ? remoteAdmin : localAdmin,
+    profile: useSupabase ? remoteProfile : localProfile,
+    publicProfiles,
     async isCloud() { return Boolean(await remoteUserId()); },
   };
 })();

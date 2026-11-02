@@ -27,7 +27,6 @@
       <nav class="steps" aria-label="Шаги">
         <a class="step" href="#login" data-step="login">1. Вход</a>
         <a class="step" href="#register" data-step="register">2. Регистрация</a>
-        <a class="step" href="#plan" data-step="plan">3. Выбор плана</a>
       </nav>
 
       <!-- Вход -->
@@ -117,38 +116,6 @@
             <a href="#login" id="confirm-back">Изменить почту</a>
           </div>
         </form>
-      </section>
-
-      <!-- Выбор плана -->
-      <section data-panel="plan" class="hidden">
-        <h1 class="auth-title">Выбор плана</h1>
-        <p class="auth-lead">Все основные инструменты бесплатны. Персональный план — для тех, кому нужна поддержка нутрициолога.</p>
-        <div class="plans" style="max-width:none">
-          <article class="card plan">
-            <h3>Базовый</h3>
-            <div class="plan-price">0 ₽ <small>навсегда</small></div>
-            <ul class="check-list">
-              <li>Калькулятор ИМТ и калорий</li>
-              <li>Рекомендации и сравнение продуктов</li>
-              <li>Конструктор рациона и сохранение меню</li>
-              <li>Форум сообщества</li>
-            </ul>
-            <button class="btn btn-lime btn-block" type="button" data-plan="basic">Выбрать базовый</button>
-          </article>
-          <article class="card plan featured">
-            <span class="plan-tag">С поддержкой</span>
-            <h3>Персональный</h3>
-            <div class="plan-price">990 ₽ <small>/ месяц</small></div>
-            <ul class="check-list">
-              <li>Всё из базового плана</li>
-              <li>Консультация нутрициолога онлайн</li>
-              <li>Меню на месяц под ваши цели</li>
-              <li>Еженедельная обратная связь</li>
-            </ul>
-            <button class="btn btn-primary btn-block" type="button" data-plan="personal">Оставить заявку</button>
-          </article>
-        </div>
-        <p class="form-note" id="plan-note" style="margin-top:24px">Текущий план: <b id="plan-current">—</b></p>
       </section>
 
       <!-- Новый пароль (после ссылки из письма) -->

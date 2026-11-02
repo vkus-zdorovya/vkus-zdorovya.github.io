@@ -895,3 +895,40 @@ p { margin: 0 0 1em; }
 .reply [data-del-reply] { margin-top: 4px; font-size: .85rem; color: var(--danger); }
 .forum-layout > aside { position: sticky; top: calc(var(--header-h) + 20px); }
 @media (max-width: 1240px) { .forum-layout > aside { position: static; } }
+
+/* шапка на узких телефонах: длинное название не выталкивает кнопку меню */
+.site-header .logo { min-width: 0; }
+.site-header .logo span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.burger, .theme-btn { flex-shrink: 0; }
+@media (max-width: 600px) {
+  .site-header .logo { font-size: 1.05rem; gap: 6px; }
+  .site-header .container { gap: 8px; }
+  .theme-btn { width: 36px; height: 36px; }
+}
+@media (max-width: 380px) {
+  .site-header .logo span { display: none; }
+}
+.menu-open .nav { z-index: 60; }
+
+/* аватарки */
+.avatar {
+  display: inline-grid; place-items: center; flex-shrink: 0; overflow: hidden;
+  width: 40px; height: 40px; border-radius: 50%;
+  background: var(--green-100); color: var(--accent-text); font-weight: 700;
+}
+.avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.avatar-sm { width: 26px; height: 26px; font-size: .8rem; }
+.avatar-lg { width: 96px; height: 96px; font-size: 2.2rem; }
+.post-author { display: inline-flex; align-items: center; gap: 8px; }
+.profile-row { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
+.profile-row > div { flex: 1 1 260px; min-width: 0; }
+.avatar-requests { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+.avatar-request { text-align: center; display: grid; gap: 10px; justify-items: center; }
+.reply-box { display: grid; gap: 10px; margin-top: 12px; }
+.answered { opacity: .7; }
+@media (max-width: 600px) {
+  .site-header .header-actions .user-chip { display: none; }
+}
+/* на средних экранах в шапке только аватарка, ник — во всплывающей подсказке */
+.chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 130px; }
+@media (max-width: 1440px) { .chip-name { display: none; } }
