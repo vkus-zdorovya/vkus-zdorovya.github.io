@@ -21,12 +21,18 @@
       return;
     }
     box.innerHTML = `
+      <div class="profile-banner" id="banner-preview">${user.banner_url ? `<img src="${esc(user.banner_url)}" alt="Баннер профиля">` : ''}</div>
       <div class="profile-row">
         <span id="avatar-preview">${UI.avatarHtml(user.name, user.avatar_url, 'avatar-lg')}</span>
         <div>
           <h2 style="font-size:1.5rem;margin-bottom:4px">${esc(user.name)}</h2>
           <div class="muted">${esc(user.email)}</div>
-          <p class="small muted" id="avatar-status" style="margin:8px 0 0">${user.avatar_pending ? '⏳ Новое фото на проверке у администратора' : ''}</p>
+          <p class="small muted" id="avatar-status" style="margin:8px 0 0">${[
+            user.avatar_pending ? '⏳ Новое фото на проверке у администратора' : '',
+            user.banner_pending ? '⏳ Новый баннер на проверке у администратора' : '',
+          ].filter(Boolean).join('<br>')}</p>
+          ${user.muted_until && new Date(user.muted_until) > new Date() ? `<p class="small" style="color:var(--danger);margin:6px 0 0">🔇 Мут до ${esc(new Date(user.muted_until).toLocaleString('ru-RU'))}</p>` : ''}
+          <a class="small" href="profile.html?id=${encodeURIComponent(user.id)}">Мой публичный профиль →</a>
         </div>
         <button class="btn btn-danger btn-sm" type="button" id="logout2">Выйти</button>
       </div>
@@ -44,11 +50,20 @@
           <span class="label">Фото профиля</span>
           <div class="inline-form">
             <label class="btn btn-ghost" for="avatar-file" style="cursor:pointer">📷 Выбрать фото</label>
-            <input type="file" id="avatar-file" accept="image/jpeg,image/png,image/webp" class="sr-only">
-            <button class="btn btn-primary hidden" type="button" id="avatar-send">Отправить на проверку</button>
-            ${user.avatar_url ? '<button class="btn btn-ghost" type="button" id="avatar-remove">Удалить фото</button>' : ''}
+            <input type="file" id="avatar-file" accept="image/jpeg,image/png,image/webp,image/gif" class="sr-only">
+            ${user.avatar_url ? '<button class="btn btn-ghost" type="button" data-remove="avatar">Удалить фото</button>' : ''}
           </div>
-          <span class="small muted">JPG, PNG или WebP. Фото появится на сайте после проверки администратором.</span>
+          <span class="small muted">JPG, PNG, WebP или GIF (до 2 МБ). ${user.role === 'admin' ? 'Вы администратор — фото появится сразу.' : 'Отправляется на проверку сразу после выбора и появится после одобрения.'}</span>
+        </div>
+
+        <div class="field">
+          <span class="label">Баннер профиля</span>
+          <div class="inline-form">
+            <label class="btn btn-ghost" for="banner-file" style="cursor:pointer">🖼 Выбрать баннер</label>
+            <input type="file" id="banner-file" accept="image/jpeg,image/png,image/webp,image/gif" class="sr-only">
+            ${user.banner_url ? '<button class="btn btn-ghost" type="button" data-remove="banner">Удалить баннер</button>' : ''}
+          </div>
+          <span class="small muted">Широкая картинка вверху профиля, лучше 1500×500. Можно GIF до 5 МБ. ${user.role === 'admin' ? 'Появится сразу.' : 'Тоже проходит проверку.'}</span>
         </div>
       </div>`;
 
@@ -64,6 +79,10 @@
         toast('Ник должен быть не короче 2 символов', 'error');
         return;
       }
+      if (!(await DB.checkText(name))) {
+        toast('Ник содержит недопустимые слова', 'error');
+        return;
+      }
       try {
         await DB.profile.updateName(name);
         toast('Ник сохранён');
@@ -73,61 +92,81 @@
       }
     });
 
-    let picked = null;
-    box.querySelector('#avatar-file').addEventListener('change', async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
-        toast('Подходят только JPG, PNG или WebP', 'error');
-        return;
-      }
-      try {
-        picked = await squareImage(file, 256);
-        box.querySelector('#avatar-preview').innerHTML = `<span class="avatar avatar-lg"><img src="${URL.createObjectURL(picked)}" alt="Новое фото"></span>`;
-        box.querySelector('#avatar-send').classList.remove('hidden');
-      } catch {
-        toast('Не удалось открыть изображение', 'error');
-      }
-    });
-
-    box.querySelector('#avatar-send').addEventListener('click', async (e) => {
-      if (!picked) return;
-      e.target.disabled = true;
-      try {
-        await DB.profile.requestAvatar(picked);
-        box.querySelector('#avatar-status').textContent = '⏳ Новое фото на проверке у администратора';
-        e.target.classList.add('hidden');
-        toast('Фото отправлено на проверку');
-      } catch (error) {
-        toast(error.message, 'error');
-      } finally {
-        e.target.disabled = false;
-      }
-    });
-
-    const removeBtn = box.querySelector('#avatar-remove');
-    if (removeBtn) {
-      removeBtn.addEventListener('click', async () => {
-        if (!confirm('Удалить фото профиля?')) return;
+    /* фото / баннер отправляется сразу после выбора; GIF загружается как есть, чтобы сохранить анимацию */
+    const LIMITS = { avatar: 2, banner: 5 };
+    ['avatar', 'banner'].forEach((kind) => {
+      const input = box.querySelector(`#${kind}-file`);
+      const label = box.querySelector(`label[for="${kind}-file"]`);
+      input.addEventListener('change', async () => {
+        const file = input.files[0];
+        input.value = '';
+        if (!file) return;
+        if (!/^image\/(jpeg|png|webp|gif)$/.test(file.type)) {
+          toast('Подходят только JPG, PNG, WebP или GIF', 'error');
+          return;
+        }
+        if (file.type === 'image/gif' && file.size > LIMITS[kind] * 1024 * 1024) {
+          toast(`GIF слишком большой — максимум ${LIMITS[kind]} МБ`, 'error');
+          return;
+        }
+        const labelText = label.textContent;
+        label.textContent = '⏳ Загружаем…';
+        label.style.pointerEvents = 'none';
         try {
-          await DB.profile.removeAvatar();
+          const blob = file.type === 'image/gif'
+            ? file
+            : await cropImage(file, kind === 'avatar' ? 256 : 1500, kind === 'avatar' ? 256 : 500);
+          const result = await DB.profile.requestMedia(kind, blob);
+          if (result === 'approved') {
+            toast(kind === 'avatar' ? 'Фото обновлено' : 'Баннер обновлён');
+            setTimeout(() => location.reload(), 600);
+            return;
+          }
+          const url = URL.createObjectURL(blob);
+          if (kind === 'avatar') {
+            box.querySelector('#avatar-preview').innerHTML = `<span class="avatar avatar-lg"><img src="${url}" alt="Новое фото"></span>`;
+          } else {
+            box.querySelector('#banner-preview').innerHTML = `<img src="${url}" alt="Новый баннер">`;
+          }
+          const status = box.querySelector('#avatar-status');
+          const line = `⏳ ${kind === 'avatar' ? 'Новое фото' : 'Новый баннер'} на проверке у администратора`;
+          if (!status.textContent.includes(line.slice(2))) status.innerHTML += `${status.innerHTML.trim() ? '<br>' : ''}${line}`;
+          toast(kind === 'avatar' ? 'Фото отправлено на проверку' : 'Баннер отправлен на проверку');
+        } catch (error) {
+          toast(error.message || 'Не удалось загрузить изображение', 'error');
+        } finally {
+          label.textContent = labelText;
+          label.style.pointerEvents = '';
+        }
+      });
+    });
+
+    box.querySelectorAll('[data-remove]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const kind = btn.dataset.remove;
+        if (!confirm(kind === 'avatar' ? 'Удалить фото профиля?' : 'Удалить баннер?')) return;
+        try {
+          await DB.profile.removeMedia(kind);
           location.reload();
         } catch (error) {
           toast(error.message, 'error');
         }
       });
-    }
+    });
   }
 
-  /* обрезаем фото до квадрата и уменьшаем — так оно весит 20–40 КБ */
-  function squareImage(file, size) {
+  /* обрезаем картинку под нужные пропорции и уменьшаем — так она весит десятки КБ */
+  function cropImage(file, width, height) {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
-        const side = Math.min(img.width, img.height);
+        const scale = Math.max(width / img.width, height / img.height);
+        const sw = width / scale;
+        const sh = height / scale;
         const canvas = document.createElement('canvas');
-        canvas.width = canvas.height = size;
-        canvas.getContext('2d').drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, size, size);
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d').drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, 0, 0, width, height);
         URL.revokeObjectURL(img.src);
         canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('canvas'))), 'image/jpeg', 0.85);
       };
@@ -135,6 +174,7 @@
       img.src = URL.createObjectURL(file);
     });
   }
+
 
 
   /* ---------- вес ---------- */

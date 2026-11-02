@@ -45,7 +45,7 @@
 
   /* ---------- вкладки ---------- */
 
-  const loaders = { overview: loadStats, users: loadUsers, avatars: loadAvatars, forum: loadForum, messages: loadMessages };
+  const loaders = { overview: loadStats, users: loadUsers, avatars: loadAvatars, forum: loadForum, words: loadWords, messages: loadMessages };
   $('admin-tabs').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-tab]');
     if (!btn) return;
@@ -75,7 +75,8 @@
         ['🗓 Сохранённых рационов', s.rations, ''],
         ['📔 Записей в дневниках', s.diary, ''],
         ['📩 Сообщений с сайта', s.messages, ''],
-        ['🖼 Фото на проверке', s.avatars_pending || 0, ''],
+        ['🖼 Фото и баннеры на проверке', s.avatars_pending || 0, ''],
+        ['🔇 Замученных', s.muted || 0, ''],
       ];
       $('avatars-count').textContent = s.avatars_pending ? `(${s.avatars_pending})` : '';
       box.innerHTML = tiles.map(([label, value, note]) => `
@@ -91,12 +92,23 @@
     const list = users.filter((u) => !q || (u.name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q));
     $('users').innerHTML = list.length ? `
       <table class="table">
-        <tr><th>Имя</th><th>Почта</th><th>Роль</th><th>Регистрация</th><th>Последний вход</th><th></th></tr>
+        <tr><th>Имя</th><th>Почта</th><th>Роль</th><th>Мут</th><th>Регистрация</th><th>Последний вход</th><th></th></tr>
         ${list.map((u) => `
           <tr data-id="${esc(u.id)}">
             <td>${esc(u.name || '—')}</td>
             <td>${esc(u.email)} ${u.confirmed ? '' : '<span class="tag" title="Почта не подтверждена">не подтв.</span>'}</td>
             <td>${u.role === 'admin' ? '<span class="tag">админ</span>' : 'пользователь'}</td>
+            <td>${isMuted(u)
+              ? `<span class="tag" title="${esc(u.mute_reason || '')}">🔇 до ${esc(new Date(u.muted_until).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}</span>
+                 <button class="link-btn" type="button" data-unmute>снять</button>`
+              : u.id === me.id ? '—' : `<select class="select" data-mute-time style="min-height:34px;padding:2px 30px 2px 8px;width:auto">
+                  <option value="">Замутить…</option>
+                  <option value="1">на 1 час</option>
+                  <option value="24">на сутки</option>
+                  <option value="168">на неделю</option>
+                  <option value="720">на месяц</option>
+                  <option value="forever">навсегда</option>
+                </select>`}</td>
             <td>${fmt(u.created_at)}</td>
             <td>${fmt(u.last_sign_in_at)}</td>
             <td>${u.id === me.id ? '' : `
@@ -105,6 +117,8 @@
           </tr>`).join('')}
       </table>` : '<p class="muted">Никого не найдено.</p>';
   }
+
+  const isMuted = (u) => u.muted_until && new Date(u.muted_until) > new Date();
 
   function loadUsers() {
     return guard($('users'), async () => {
@@ -115,10 +129,41 @@
 
   $('user-search').addEventListener('input', renderUsers);
 
+  $('users').addEventListener('change', async (e) => {
+    const sel = e.target.closest('[data-mute-time]');
+    if (!sel || !sel.value) return;
+    const u = users.find((x) => x.id === sel.closest('tr').dataset.id);
+    const reason = prompt(`Причина мута для ${u.name || u.email} (её увидит пользователь):`, 'Нарушение правил форума');
+    if (reason === null) {
+      sel.value = '';
+      return;
+    }
+    const until = sel.value === 'forever'
+      ? new Date('2099-12-31T00:00:00Z').toISOString()
+      : new Date(Date.now() + Number(sel.value) * 3600 * 1000).toISOString();
+    try {
+      await DB.admin.mute(u.id, until, reason.trim() || 'Нарушение правил форума');
+      toast(`${u.name || u.email} замучен`);
+      loadUsers();
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  });
+
   $('users').addEventListener('click', async (e) => {
     const row = e.target.closest('tr');
     if (!row) return;
     const u = users.find((x) => x.id === row.dataset.id);
+    if (e.target.closest('[data-unmute]')) {
+      try {
+        await DB.admin.mute(u.id, null, null);
+        toast('Мут снят');
+        loadUsers();
+      } catch (error) {
+        toast(error.message, 'error');
+      }
+      return;
+    }
     const roleBtn = e.target.closest('[data-role]');
     const delBtn = e.target.closest('[data-del-user]');
     try {
@@ -137,23 +182,26 @@
     }
   });
 
-  /* ---------- проверка фото ---------- */
+  /* ---------- проверка фото и баннеров ---------- */
 
+  let media = [];
   function loadAvatars() {
     const box = $('avatar-requests');
     return guard(box, async () => {
-      const list = await DB.admin.avatarRequests();
-      $('avatars-count').textContent = list.length ? `(${list.length})` : '';
-      box.innerHTML = list.length ? list.map((r) => `
-        <div class="card avatar-request" data-id="${esc(r.id)}">
-          <span class="avatar avatar-lg"><img src="${esc(r.pending_url)}" alt="Новое фото"></span>
+      media = await DB.admin.mediaRequests();
+      $('avatars-count').textContent = media.length ? `(${media.length})` : '';
+      box.innerHTML = media.length ? media.map((r, i) => `
+        <div class="card avatar-request" data-i="${i}">
+          <span class="tag">${r.kind === 'banner' ? '🖼 Баннер' : '👤 Фото профиля'}</span>
+          ${r.kind === 'banner'
+            ? `<img class="media-request-banner" src="${esc(r.pending_url)}" alt="Новый баннер">`
+            : `<span class="avatar avatar-lg"><img src="${esc(r.pending_url)}" alt="Новое фото"></span>`}
           <div><b>${esc(r.name || '—')}</b><br><span class="small muted">${esc(r.email)}</span></div>
-          ${r.current_url ? `<div class="small muted post-author">Сейчас: <span class="avatar avatar-sm"><img src="${esc(r.current_url)}" alt=""></span></div>` : ''}
           <div class="inline-form" style="justify-content:center">
             <button class="btn btn-primary btn-sm" type="button" data-approve>✓ Одобрить</button>
             <button class="btn btn-danger btn-sm" type="button" data-reject>✕ Отклонить</button>
           </div>
-        </div>`).join('') : '<div class="card muted center" style="grid-column:1/-1">Новых фото нет.</div>';
+        </div>`).join('') : '<div class="card muted center" style="grid-column:1/-1">Новых фото и баннеров нет.</div>';
     });
   }
 
@@ -162,10 +210,52 @@
     const approve = e.target.closest('[data-approve]');
     const reject = e.target.closest('[data-reject]');
     if (!card || (!approve && !reject)) return;
+    const r = media[Number(card.dataset.i)];
     try {
-      await DB.admin.reviewAvatar(card.dataset.id, Boolean(approve));
-      toast(approve ? 'Фото одобрено' : 'Фото отклонено');
+      await DB.admin.reviewMedia(r.id, r.kind, Boolean(approve));
+      toast(approve ? 'Одобрено' : 'Отклонено');
       loadAvatars();
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  });
+
+  /* ---------- запрещённые слова ---------- */
+
+  function loadWords() {
+    const box = $('words');
+    return guard(box, async () => {
+      const words = await DB.admin.words();
+      box.innerHTML = words.length
+        ? words.map((w) => `<span class="chip">${esc(w)} <button class="link-btn" type="button" data-del-word="${esc(w)}" aria-label="Удалить ${esc(w)}">✕</button></span>`).join('')
+        : '<p class="muted">Список пуст.</p>';
+    });
+  }
+
+  $('word-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = $('word-input');
+    const word = input.value.trim().toLowerCase().replace(/ё/g, 'е');
+    if (!/^[а-яa-z0-9]{2,40}\*?$/.test(word)) {
+      toast('Только буквы и цифры, от 2 до 40 символов, можно со * на конце', 'error');
+      return;
+    }
+    try {
+      await DB.admin.addWord(word);
+      input.value = '';
+      toast(`«${word}» добавлено`);
+      loadWords();
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  });
+
+  $('words').addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-del-word]');
+    if (!btn) return;
+    try {
+      await DB.admin.removeWord(btn.dataset.delWord);
+      loadWords();
     } catch (error) {
       toast(error.message, 'error');
     }
@@ -173,17 +263,20 @@
 
   /* ---------- форум ---------- */
 
+  let forumPosts = [];
   function loadForum() {
     const box = $('admin-posts');
     return guard(box, async () => {
-      const posts = await DB.forum.list();
+      forumPosts = await DB.forum.list();
+      const posts = forumPosts;
       box.innerHTML = posts.length ? posts.map((p) => `
         <article class="card post" data-id="${esc(String(p.id))}">
-          <h3>${esc(p.title)}</h3>
+          <h3>${p.pinned ? '📌 ' : ''}${esc(p.title)}</h3>
           <div class="post-meta"><span class="badge">${esc(p.topic || 'Общее')}</span><span>👤 ${esc(p.author_name)}</span><span>${fmt(p.created_at)}</span></div>
           <div class="post-body clamped">${esc(p.body)}</div>
           <div class="post-foot">
             <button class="btn btn-ghost btn-sm" type="button" data-replies>💬 Ответы (${p.replies_count})</button>
+            <button class="btn btn-ghost btn-sm" type="button" data-pin>${p.pinned ? 'Открепить' : '📌 Закрепить'}</button>
             <button class="btn btn-danger btn-sm" type="button" data-del-post>Удалить тему</button>
           </div>
           <div class="replies hidden"></div>
@@ -208,6 +301,12 @@
     if (!card) return;
     try {
       if (e.target.closest('[data-replies]')) await showReplies(card);
+      if (e.target.closest('[data-pin]')) {
+        const post = forumPosts.find((p) => String(p.id) === card.dataset.id);
+        await DB.admin.pinPost(post.id, !post.pinned);
+        toast(post.pinned ? 'Тема откреплена' : 'Тема закреплена');
+        loadForum();
+      }
       if (e.target.closest('[data-del-post]') && confirm('Удалить тему вместе со всеми ответами?')) {
         await DB.forum.remove(card.dataset.id);
         toast('Тема удалена');

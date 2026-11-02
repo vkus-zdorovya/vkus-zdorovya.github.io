@@ -15,6 +15,7 @@
   <script defer src="js/vendor/supabase.js"></script>
   <script defer src="js/config.js"></script>
   <script defer src="js/db.js"></script>
+  <script defer src="js/data.js"></script>
   <script defer src="js/main.js"></script>
   <script defer src="js/admin.js"></script>
 </head>
@@ -60,6 +61,7 @@
             <button type="button" data-tab="users">Пользователи</button>
             <button type="button" data-tab="avatars">Фото <span id="avatars-count"></span></button>
             <button type="button" data-tab="forum">Форум</button>
+            <button type="button" data-tab="words">Слова</button>
             <button type="button" data-tab="messages">Сообщения</button>
           </div>
           <button class="btn btn-ghost btn-sm" type="button" id="admin-exit">Выйти из режима администратора</button>
@@ -77,12 +79,26 @@
         </div>
 
         <div data-pane="avatars" class="hidden">
-          <p class="muted">Новые фото профиля появляются на сайте только после одобрения.</p>
+          <p class="muted">Новые фото и баннеры появляются на сайте только после одобрения.</p>
           <div class="avatar-requests" id="avatar-requests"></div>
         </div>
 
         <div data-pane="forum" class="hidden">
           <div class="posts" id="admin-posts"></div>
+        </div>
+
+        <div data-pane="words" class="hidden">
+          <div class="card">
+            <h2 style="font-size:1.3rem">Запрещённые слова</h2>
+            <p class="muted small">Сообщения на форуме, ответы, обращения через форму и ники с этими словами не отправляются.<br>
+              <b>слово</b> — только это слово целиком (например, «бля», но не «бляшки»).<br>
+              <b>слово*</b> — все слова, которые так начинаются (например, «дебил*» запретит «дебилы» и «дебильный»).</p>
+            <form class="inline-form" id="word-form" novalidate>
+              <div class="field"><label for="word-input">Новое слово</label><input class="input" id="word-input" maxlength="41" placeholder="например: тупица*"></div>
+              <button class="btn btn-primary" type="submit">Добавить</button>
+            </form>
+            <div class="chips" id="words" style="margin-top:20px"></div>
+          </div>
         </div>
 
         <div data-pane="messages" class="hidden">

@@ -932,3 +932,20 @@ p { margin: 0 0 1em; }
 /* на средних экранах в шапке только аватарка, ник — во всплывающей подсказке */
 .chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 130px; }
 @media (max-width: 1440px) { .chip-name { display: none; } }
+/* закреплённые темы */
+.post.pinned { border: 2px solid var(--lime); }
+.pin-mark { font-size: .9em; }
+a.post-author { color: inherit; text-decoration: none; }
+a.post-author:hover { text-decoration: underline; }
+/* баннер профиля */
+.profile-banner {
+  height: 180px; margin: calc(clamp(20px, 4vw, 40px) * -1) calc(clamp(20px, 4vw, 40px) * -1) 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0; overflow: hidden;
+  background: linear-gradient(120deg, #b9e2a3, #6cbf6f 55%, #2d6a3e);
+}
+.profile-banner img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.profile-banner + .profile-row { margin-top: -44px; padding: 0 4px; }
+.profile-banner + .profile-row .avatar-lg { border: 4px solid var(--surface); box-shadow: var(--shadow-soft); }
+.profile-banner + .profile-row > div { padding-top: 48px; }
+@media (max-width: 600px) { .profile-banner { height: 120px; } }
+.media-request-banner { width: 100%; aspect-ratio: 3 / 1; object-fit: cover; border-radius: 14px; }

@@ -183,6 +183,10 @@
         error.textContent = 'Заполните имя, корректную почту и сообщение';
         return;
       }
+      if (!(await DB.checkText(data.name + ' ' + data.message))) {
+        error.textContent = 'Сообщение содержит недопустимые слова. Исправьте текст и попробуйте снова';
+        return;
+      }
       const btn = form.querySelector('button[type="submit"]');
       btn.disabled = true;
       try {

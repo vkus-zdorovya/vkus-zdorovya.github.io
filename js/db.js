@@ -45,8 +45,11 @@
     [/failed to fetch|networkerror|load failed/i, 'Нет связи с сервером. Проверьте интернет'],
     [/row-level security|permission denied|нет доступа/i, 'Недостаточно прав для этого действия'],
     [/could not find the function|function .* does not exist/i, 'Функция ещё не настроена в базе: выполните supabase/schema-3-admin.sql и schema-4-profile.sql'],
+    [/duplicate key.*banned_words|banned_words_pkey/i, 'Такое слово уже есть в списке'],
+    [/banned_words_word_check/i, 'Слово: только буквы и цифры, от 2 до 40 символов, можно со * на конце'],
     [/bucket not found/i, 'Хранилище аватарок не настроено: выполните supabase/schema-4-profile.sql'],
-    [/payload too large|exceeded the maximum allowed size/i, 'Файл слишком большой — максимум 2 МБ'],
+    [/payload too large|exceeded the maximum allowed size/i, 'Файл слишком большой — максимум 5 МБ'],
+    [/mime type .* is not supported|invalid_mime_type/i, 'Этот формат не поддерживается. Нужен JPG, PNG, WebP или GIF'],
   ];
 
   function humanError(err) {
@@ -83,6 +86,23 @@
 
   /* полный адрес страницы сайта — для ссылок в письмах */
   const pageUrl = (page) => location.href.replace(/[#?].*$/, '').replace(/[^/]*$/, '') + page;
+
+  /* ---------- демо-режим: запрещённые слова и мут (в базе это делают триггеры) ---------- */
+  const localWords = () => store.get('banned_words', window.DEFAULT_BANNED_WORDS || []);
+  function findBanned(text, words = localWords()) {
+    const t = String(text || '').toLowerCase().replace(/ё/g, 'е');
+    return words.find((w) => {
+      const stem = w.endsWith('*') ? w.slice(0, -1) : w;
+      const tail = w.endsWith('*') ? '' : '(?![а-яa-z0-9])';
+      return new RegExp(`(^|[^а-яa-z0-9])${stem}${tail}`).test(t);
+    }) || null;
+  }
+  function localGuard(user, text) {
+    if (user.muted_until && new Date(user.muted_until) > new Date()) {
+      throw new Error(`Вы не можете писать на форуме до ${new Date(user.muted_until).toLocaleString('ru-RU')}`);
+    }
+    if (findBanned(text)) throw new Error('Сообщение содержит недопустимые слова. Исправьте текст и попробуйте снова');
+  }
 
   /* публичная ссылка на файл аватарки в хранилище Supabase */
   function avatarUrl(path) {
@@ -147,6 +167,10 @@
           role: (profile && profile.role) || 'user',
           avatar_url: avatarUrl(profile && profile.avatar_url),
           avatar_pending: Boolean(profile && profile.avatar_pending),
+          banner_url: avatarUrl(profile && profile.banner_url),
+          banner_pending: Boolean(profile && profile.banner_pending),
+          muted_until: (profile && profile.muted_until) || null,
+          mute_reason: (profile && profile.mute_reason) || null,
         };
       },
       async updatePlan(plan) {
@@ -188,13 +212,20 @@
     },
 
     forum: {
-      async list() {
-        const rows = await run(
-          sb.from('forum_posts')
-            .select('id, title, body, topic, author_id, author_name, created_at, forum_replies(count)')
-            .order('created_at', { ascending: false })
-            .limit(200)
-        );
+      async list(authorId) {
+        const query = (withPin) => {
+          let q = sb.from('forum_posts')
+            .select(`id, title, body, topic, author_id, author_name, created_at, ${withPin ? 'pinned, ' : ''}forum_replies(count)`);
+          if (authorId) q = q.eq('author_id', authorId);
+          if (withPin) q = q.order('pinned', { ascending: false });
+          return q.order('created_at', { ascending: false }).limit(200);
+        };
+        let rows;
+        try {
+          rows = await run(query(true));
+        } catch {
+          rows = await run(query(false)); // schema-5 ещё не выполнен
+        }
         return rows.map((r) => ({ ...r, replies_count: (r.forum_replies && r.forum_replies[0] && r.forum_replies[0].count) || 0 }));
       },
       async create({ title, body, topic }) {
@@ -274,6 +305,8 @@
         return user ? {
           id: user.id, email: user.email, name: user.name, plan: user.plan, role: user.role || 'user',
           avatar_url: user.avatar_url || null, avatar_pending: Boolean(user.avatar_pending),
+          banner_url: user.banner_url || null, banner_pending: Boolean(user.banner_pending),
+          muted_until: user.muted_until || null, mute_reason: user.mute_reason || null,
         } : null;
       },
       async updatePlan(plan) {
@@ -315,16 +348,18 @@
     },
 
     forum: {
-      async list() {
+      async list(authorId) {
         seedForum();
         const replies = store.get('forum_replies', []);
         return store.get('forum_posts', [])
+          .filter((p) => !authorId || p.author_id === authorId)
           .map((p) => ({ ...p, replies_count: replies.filter((r) => r.post_id === p.id).length }))
-          .sort((a, b) => b.created_at.localeCompare(a.created_at));
+          .sort((a, b) => (Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))) || b.created_at.localeCompare(a.created_at));
       },
       async create({ title, body, topic }) {
         const user = await local.auth.getUser();
         if (!user) throw new Error('Сначала войдите в аккаунт');
+        localGuard(user, title + ' ' + body);
         const posts = store.get('forum_posts', []);
         const row = { id: newId(), title, body, topic, author_id: user.id, author_name: user.name, created_at: new Date().toISOString() };
         posts.push(row);
@@ -344,6 +379,7 @@
       async reply(postId, body) {
         const user = await local.auth.getUser();
         if (!user) throw new Error('Сначала войдите в аккаунт');
+        localGuard(user, body);
         const all = store.get('forum_replies', []);
         const row = { id: newId(), post_id: postId, body, author_id: user.id, author_name: user.name, created_at: new Date().toISOString() };
         all.push(row);
@@ -354,6 +390,7 @@
 
     contact: {
       async send(message) {
+        if (findBanned(message.name + ' ' + message.message)) throw new Error('Сообщение содержит недопустимые слова. Исправьте текст и попробуйте снова');
         const all = store.get('messages', []);
         all.push({ ...message, created_at: new Date().toISOString() });
         store.set('messages', all);
@@ -512,13 +549,15 @@
         posts: store.get('forum_posts', []).length, replies: store.get('forum_replies', []).length,
         rations: store.get('rations', []).length, diary: store.get('diary', []).length,
         messages: store.get('messages', []).length,
-        avatars_pending: users.filter((u) => u.avatar_pending).length,
+        avatars_pending: users.filter((u) => u.avatar_pending).length + users.filter((u) => u.banner_pending).length,
+        muted: users.filter((u) => u.muted_until && new Date(u.muted_until) > new Date()).length,
       };
     },
     async users() {
       return Object.values(store.get('users', {})).map((u) => ({
         id: u.id, email: u.email, name: u.name, plan: u.plan, role: u.role || 'user',
         created_at: null, confirmed: true, last_sign_in_at: null,
+        muted_until: u.muted_until || null, mute_reason: u.mute_reason || null,
       }));
     },
     async setPlan(id, plan) {
@@ -558,16 +597,17 @@
       if (!data || !data.session) throw new Error('Сначала войдите в аккаунт');
       await run(sb.from('profiles').update({ name }).eq('id', data.session.user.id));
     },
-    /* фото загружается в хранилище и ждёт одобрения администратора */
-    async requestAvatar(blob) {
+    /* фото или баннер загружается в хранилище и ждёт одобрения администратора */
+    async requestMedia(kind, blob) {
       const { data } = await sb.auth.getSession();
       if (!data || !data.session) throw new Error('Сначала войдите в аккаунт');
-      const path = `${data.session.user.id}/${newId()}.jpg`;
-      await run(sb.storage.from('avatars').upload(path, blob, { contentType: 'image/jpeg', upsert: false }));
-      await run(sb.rpc('request_avatar', { path }));
+      const ext = { 'image/gif': 'gif', 'image/png': 'png', 'image/webp': 'webp' }[blob.type] || 'jpg';
+      const path = `${data.session.user.id}/${kind}-${newId()}.${ext}`;
+      await run(sb.storage.from('avatars').upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: false }));
+      return (await run(sb.rpc('request_media', { kind, path }))) || 'pending';
     },
-    async removeAvatar() {
-      await run(sb.rpc('remove_avatar'));
+    async removeMedia(kind) {
+      await run(sb.rpc('remove_media', { kind }));
     },
   };
 
@@ -576,30 +616,46 @@
       const key = store.get('session');
       const users = store.get('users', {});
       if (!key || !users[key]) throw new Error('Сначала войдите в аккаунт');
+      if (findBanned(name)) throw new Error('Ник содержит недопустимые слова');
       users[key].name = name;
       store.set('users', users);
     },
-    async requestAvatar(blob) {
+    async requestMedia(kind, blob) {
       const key = store.get('session');
       const users = store.get('users', {});
       if (!key || !users[key]) throw new Error('Сначала войдите в аккаунт');
-      users[key].avatar_pending = await new Promise((resolve) => {
+      const data = await new Promise((resolve) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result);
         reader.readAsDataURL(blob);
       });
+      // администратору фото ставится сразу, остальным — после проверки
+      const admin = users[key].role === 'admin';
+      users[key][admin ? `${kind}_url` : `${kind}_pending`] = data;
+      if (admin) users[key][`${kind}_pending`] = null;
       store.set('users', users);
+      return admin ? 'approved' : 'pending';
     },
-    async removeAvatar() {
+    async removeMedia(kind) {
       const key = store.get('session');
       const users = store.get('users', {});
       if (users[key]) {
-        users[key].avatar_url = null;
-        users[key].avatar_pending = null;
+        users[key][`${kind}_url`] = null;
+        users[key][`${kind}_pending`] = null;
         store.set('users', users);
       }
     },
   };
+
+  /* есть ли в тексте запрещённые слова (true — текст можно отправлять) */
+  async function checkText(text) {
+    if (!useSupabase) return !findBanned(text);
+    try {
+      return await run(sb.rpc('check_text', { txt: text }));
+    } catch {
+      return true; // функция ещё не создана — проверит сама база при отправке
+    }
+  }
 
   /* имена и одобренные аватарки авторов (для форума) */
   async function publicProfiles(ids) {
@@ -615,18 +671,35 @@
     } else {
       rows = Object.values(store.get('users', {})).filter((u) => unique.includes(u.id));
     }
-    return Object.fromEntries(rows.map((r) => [r.id, { name: r.name, avatar_url: avatarUrl(r.avatar_url) }]));
+    return Object.fromEntries(rows.map((r) => [r.id, {
+      id: r.id, name: r.name, avatar_url: avatarUrl(r.avatar_url), banner_url: avatarUrl(r.banner_url), created_at: r.created_at || null,
+    }]));
   }
 
   Object.assign(remoteAdmin, {
-    async avatarRequests() {
-      const rows = await run(sb.rpc('admin_avatar_requests'));
-      return rows.map((r) => ({ ...r, pending_url: avatarUrl(r.avatar_pending), current_url: avatarUrl(r.avatar_url) }));
+    async mediaRequests() {
+      const rows = await run(sb.rpc('admin_media_requests'));
+      return rows.map((r) => ({ ...r, pending_url: avatarUrl(r.pending), current_url: avatarUrl(r.current_path) }));
     },
-    async reviewAvatar(id, approve) {
-      const path = await run(sb.rpc('admin_review_avatar', { target: id, approve }));
+    async reviewMedia(id, kind, approve) {
+      const path = await run(sb.rpc('admin_review_media', { target: id, kind, approve }));
       // отклонённый файл удаляем из хранилища
       if (!approve && path) await sb.storage.from('avatars').remove([path]);
+    },
+    async pinPost(id, pin) {
+      await run(sb.rpc('admin_pin_post', { post_id: id, pin }));
+    },
+    async mute(id, until, reason) {
+      await run(sb.rpc('admin_mute', { target: id, until, reason }));
+    },
+    async words() {
+      return (await run(sb.from('banned_words').select('word').order('word'))).map((r) => r.word);
+    },
+    async addWord(word) {
+      await run(sb.from('banned_words').insert({ word }));
+    },
+    async removeWord(word) {
+      await run(sb.from('banned_words').delete().eq('word', word));
     },
     async markAnswered(id) {
       await run(sb.from('contact_messages').update({ answered_at: new Date().toISOString() }).eq('id', id));
@@ -634,19 +707,42 @@
   });
 
   Object.assign(localAdmin, {
-    async avatarRequests() {
-      return Object.values(store.get('users', {})).filter((u) => u.avatar_pending).map((u) => ({
-        id: u.id, email: u.email, name: u.name, pending_url: u.avatar_pending, current_url: u.avatar_url || null,
+    async mediaRequests() {
+      const list = [];
+      Object.values(store.get('users', {})).forEach((u) => ['avatar', 'banner'].forEach((kind) => {
+        if (u[`${kind}_pending`]) {
+          list.push({ id: u.id, email: u.email, name: u.name, kind, pending_url: u[`${kind}_pending`], current_url: u[`${kind}_url`] || null });
+        }
       }));
+      return list;
     },
-    async reviewAvatar(id, approve) {
+    async reviewMedia(id, kind, approve) {
       const users = store.get('users', {});
       Object.values(users).forEach((u) => {
         if (u.id !== id) return;
-        if (approve) u.avatar_url = u.avatar_pending;
-        u.avatar_pending = null;
+        if (approve) u[`${kind}_url`] = u[`${kind}_pending`];
+        u[`${kind}_pending`] = null;
       });
       store.set('users', users);
+    },
+    async pinPost(id, pin) {
+      store.set('forum_posts', store.get('forum_posts', []).map((p) => (p.id === id ? { ...p, pinned: pin } : p)));
+    },
+    async mute(id, until, reason) {
+      const users = store.get('users', {});
+      Object.values(users).forEach((u) => {
+        if (u.id === id) { u.muted_until = until; u.mute_reason = until ? reason : null; }
+      });
+      store.set('users', users);
+    },
+    async words() {
+      return [...localWords()].sort();
+    },
+    async addWord(word) {
+      store.set('banned_words', [...new Set([...localWords(), word])]);
+    },
+    async removeWord(word) {
+      store.set('banned_words', localWords().filter((w) => w !== word));
     },
     async markAnswered(id) {
       const all = store.get('messages', []);
@@ -666,6 +762,7 @@
     admin: useSupabase ? remoteAdmin : localAdmin,
     profile: useSupabase ? remoteProfile : localProfile,
     publicProfiles,
+    checkText,
     async isCloud() { return Boolean(await remoteUserId()); },
   };
 })();

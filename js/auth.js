@@ -192,6 +192,7 @@
     const err = regForm.querySelector('.form-error');
     const name = regForm.name.value.trim();
     if (!name) { err.textContent = 'Укажите имя'; return; }
+    if (!(await DB.checkText(name))) { err.textContent = 'Имя содержит недопустимые слова'; return; }
     if (regForm.password.value !== regForm.password2.value) { err.textContent = 'Пароли не совпадают'; return; }
     if (!regForm.agree.checked) { err.textContent = 'Нужно согласие на обработку персональных данных'; return; }
     err.textContent = '';

@@ -17,8 +17,11 @@
   function author(item) {
     const info = authors[item.author_id] || {};
     const name = info.name || item.author_name;
-    return `<span class="post-author">${UI.avatarHtml(name, info.avatar_url, 'avatar-sm')}${esc(name)}</span>`;
+    return `<a class="post-author" href="profile.html?id=${encodeURIComponent(item.author_id)}">${UI.avatarHtml(name, info.avatar_url, 'avatar-sm')}${esc(name)}</a>`;
   }
+  const isAdmin = () => user && user.role === 'admin';
+  const isMuted = () => user && user.muted_until && new Date(user.muted_until) > new Date();
+  const BAD_WORDS = 'Сообщение содержит недопустимые слова. Исправьте текст и попробуйте снова';
   const isLong = (text) => text.length > 600 || text.split('\n').length > 8;
   const canDelete = (item) => user && (user.id === item.author_id || user.role === 'admin');
   let user = null;
@@ -46,8 +49,8 @@
       return;
     }
     postsEl.innerHTML = list.map((p) => `
-      <article class="card post" data-id="${p.id}">
-        <h3>${esc(p.title)}</h3>
+      <article class="card post${p.pinned ? ' pinned' : ''}" data-id="${p.id}">
+        <h3>${p.pinned ? '<span class="pin-mark" title="Закреплено">📌</span> ' : ''}${esc(p.title)}</h3>
         <div class="post-meta">
           <span class="badge">${esc(p.topic || 'Общее')}</span>
           ${author(p)}
@@ -57,6 +60,7 @@
         ${isLong(p.body) ? '<button class="link-btn" type="button" data-expand>Показать полностью</button>' : ''}
         <div class="post-foot">
           <button class="btn btn-ghost btn-sm" type="button" data-toggle>💬 Ответы (${p.replies_count})</button>
+          ${isAdmin() ? `<button class="btn btn-ghost btn-sm" type="button" data-pin>${p.pinned ? 'Открепить' : '📌 Закрепить'}</button>` : ''}
           ${canDelete(p) ? '<button class="btn btn-danger btn-sm" type="button" data-delete>Удалить</button>' : ''}
         </div>
         <div class="replies hidden"></div>
@@ -79,13 +83,15 @@
           <div class="post-meta">${author(r)}<span>${formatDate(r.created_at)}</span></div>
           <div class="post-body">${esc(r.body)}</div>
           ${canDelete(r) ? `<button class="link-btn" type="button" data-del-reply="${r.id}">Удалить ответ</button>` : ''}
-        </div>`).join('') + (user
+        </div>`).join('') + (user && !isMuted()
         ? `<form class="reply-form" novalidate>
              <label class="sr-only" for="reply-${card.dataset.id}">Ваш ответ</label>
              <input class="input" id="reply-${card.dataset.id}" name="body" maxlength="2000" placeholder="Ваш ответ…" required>
              <button class="btn btn-primary btn-sm" type="submit">Ответить</button>
            </form>`
-        : '<p class="small muted"><a href="login.html">Войдите</a>, чтобы ответить.</p>');
+        : user
+          ? '<p class="small muted">Вы временно не можете отвечать.</p>'
+          : '<p class="small muted"><a href="login.html">Войдите</a>, чтобы ответить.</p>');
     } catch (err) {
       box.innerHTML = `<p class="form-error">${esc(err.message)}</p>`;
     }
@@ -121,6 +127,16 @@
         toast(err.message, 'error');
       }
     }
+    if (e.target.closest('[data-pin]')) {
+      const post = posts.find((p) => String(p.id) === card.dataset.id);
+      try {
+        await DB.admin.pinPost(post.id, !post.pinned);
+        toast(post.pinned ? 'Тема откреплена' : 'Тема закреплена');
+        load();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    }
     if (e.target.closest('[data-delete]') && confirm('Удалить тему вместе с ответами?')) {
       try {
         await DB.forum.remove(card.dataset.id);
@@ -138,6 +154,10 @@
     const body = replyForm.body.value.trim();
     if (!body) return;
     const card = replyForm.closest('.post');
+    if (!(await DB.checkText(body))) {
+      toast(BAD_WORDS, 'error');
+      return;
+    }
     replyForm.querySelector('button').disabled = true;
     try {
       await DB.forum.reply(card.dataset.id, body);
@@ -156,6 +176,10 @@
     const body = form.body.value.trim();
     if (title.length < 3 || !body) {
       err.textContent = 'Заголовок — минимум 3 символа, сообщение не должно быть пустым';
+      return;
+    }
+    if (!(await DB.checkText(title + ' ' + body))) {
+      err.textContent = BAD_WORDS;
       return;
     }
     err.textContent = '';
@@ -177,7 +201,13 @@
 
   userReady.then((u) => {
     user = u;
-    document.getElementById(u ? 'new-post' : 'new-post-auth').classList.remove('hidden');
+    if (isMuted()) {
+      const note = document.getElementById('new-post-auth');
+      note.innerHTML = `<p class="form-note warn">🔇 Вы не можете писать на форуме до ${esc(new Date(u.muted_until).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }))}${u.mute_reason ? `. Причина: ${esc(u.mute_reason)}` : ''}.</p>`;
+      note.classList.remove('hidden');
+    } else {
+      document.getElementById(u ? 'new-post' : 'new-post-auth').classList.remove('hidden');
+    }
     load();
   });
 })();
