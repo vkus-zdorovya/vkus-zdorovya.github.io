@@ -1123,3 +1123,12 @@ a.post-author:hover { text-decoration: underline; }
   .admin-stat-icon { width: 36px; height: 36px; font-size: 1.1rem; border-radius: 12px; }
   .admin-stat .stat-value { font-size: 1.6rem; }
 }
+
+/* страницы рецептов */
+a.recipe { text-decoration: none; }
+.crumbs { margin-bottom: 16px; color: var(--muted); }
+.crumbs a { color: var(--accent-text); }
+.recipe-page .recipe-detail { padding: clamp(20px, 4vw, 36px); }
+.recipe-page .recipe-art { aspect-ratio: 16 / 9; border-radius: var(--radius-md); margin-bottom: 20px; overflow: hidden; }
+.recipe-title { font-size: clamp(1.7rem, 3.4vw, 2.4rem); margin: 0 0 8px; }
+.recipe-page h2 { font-size: 1.3rem; margin: 8px 0; }

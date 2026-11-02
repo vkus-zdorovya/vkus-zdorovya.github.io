@@ -26,14 +26,14 @@
       (!q || r.title.toLowerCase().includes(q) || r.items.some(([id]) => FOOD[id].name.toLowerCase().includes(q))));
 
     list.innerHTML = found.length ? found.map((r) => `
-      <button type="button" class="recipe" data-id="${r.id}">
+      <a class="recipe" href="recipe-${r.id}.html" data-id="${r.id}">
         <div class="recipe-art" aria-hidden="true"><img src="img/recipes/${r.id}.webp" alt="" loading="lazy" onerror="this.replaceWith(document.createTextNode('${r.emoji}'))"></div>
         <div class="recipe-info">
           <h3>${esc(r.title)}</h3>
           <div class="recipe-meta"><span>⏱ ${r.time} мин</span><span>🔥 ${r.total.kcal} ккал</span><span>${window.MEAL_NAMES[r.meal]}</span></div>
           <div class="tags">${r.tags.filter((t) => t !== 'quick').map((t) => `<span class="tag">${TAGS[t]}</span>`).join('')}</div>
         </div>
-      </button>`).join('')
+      </a>`).join('')
       : '<div class="card center muted" style="grid-column:1/-1">Ничего не нашлось — попробуйте снять фильтры.</div>';
   }
 
@@ -113,7 +113,11 @@
 
   list.addEventListener('click', (e) => {
     const card = e.target.closest('.recipe');
-    if (card) open(card.dataset.id);
+    // ссылка ведёт на отдельную страницу рецепта (её видят поисковики), а на сайте открываем окно
+    if (card && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      e.preventDefault();
+      open(card.dataset.id);
+    }
   });
   modal.addEventListener('click', (e) => {
     if (e.target === modal || e.target.closest('[data-close]')) close();
