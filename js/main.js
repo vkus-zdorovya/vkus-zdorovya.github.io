@@ -97,6 +97,12 @@
     if (user) {
       box.innerHTML = `<a class="user-chip" href="account.html" title="${esc(user.email)}">👤 ${esc(user.name)}</a>
         <button class="btn btn-ghost btn-sm" type="button" id="logout-btn">Выйти</button>`;
+      if (user.role === 'admin') {
+        const nav = document.getElementById('nav');
+        if (nav && !nav.querySelector('[href="admin.html"]')) {
+          nav.insertAdjacentHTML('beforeend', `<a href="admin.html"${page === 'admin.html' ? ' class="active" aria-current="page"' : ''}>Админ</a>`);
+        }
+      }
       box.querySelector('#logout-btn').addEventListener('click', async () => {
         await DB.auth.signOut();
         location.reload();

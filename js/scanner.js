@@ -152,6 +152,20 @@
   };
 
   const CATEGORY_SWAPS = [
+    [/energy-drinks/, 'energy'],
+    [/burgers|hamburgers/, 'burger'],
+    [/pizzas/, 'pizza'],
+    [/breakfast-cereals|cereals/, 'cereal'],
+    [/ice-creams/, 'icecream'],
+    [/croissants/, 'croissant'],
+    [/ketchup/, 'ketchup'],
+    [/popcorn/, 'popcorn'],
+    [/crackers|croutons|rusks/, 'crackers'],
+    [/chocolate-bars|candy-bars/, 'chocobar'],
+    [/biscuits|cookies/, 'cookies'],
+    [/dumplings|pelmeni/, 'dumplings'],
+    [/nuggets/, 'nuggets'],
+    [/white-breads|sliced-breads/, 'whitebread'],
     [/sodas|soft-drinks|colas|carbonated-drinks|sweetened-beverages/, 'cola'],
     [/french-fries/, 'fries'],
     [/chips|crisps/, 'chips'],

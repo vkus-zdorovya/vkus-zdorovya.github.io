@@ -141,6 +141,106 @@ window.SWAPS = [
   },
 ];
 
+/* Дополнительные пары для калькулятора вредных продуктов */
+window.SWAPS.push(
+  {
+    id: 'burger',
+    bad: { emoji: '🍔', name: 'Бургер из фастфуда', portion: '220 г', kcal: 540, sugar: 9, fat: 28, salt: 2.3, fiber: 2 },
+    good: { emoji: '🥪', name: 'Домашний бургер с курицей и овощами', portion: '220 г', kcal: 390, sugar: 6, fat: 12, salt: 1.2, fiber: 5 },
+    tip: 'Цельнозерновая булка, запечённая куриная котлета и много овощей — тот же бургер, но почти без лишнего жира.',
+  },
+  {
+    id: 'pizza',
+    bad: { emoji: '🍕', name: 'Пицца пепперони', portion: '2 куска, 200 г', kcal: 560, sugar: 6, fat: 24, salt: 2.6, fiber: 3 },
+    good: { emoji: '🫓', name: 'Домашняя пицца с курицей и овощами', portion: '200 г', kcal: 400, sugar: 5, fat: 12, salt: 1.2, fiber: 6 },
+    tip: 'Тонкое цельнозерновое тесто, меньше сыра и колбасы, больше овощей — и пицца перестаёт быть «бомбой».',
+  },
+  {
+    id: 'shawarma',
+    bad: { emoji: '🌯', name: 'Шаурма с соусом', portion: '350 г', kcal: 700, sugar: 6, fat: 38, salt: 3.2, fiber: 4 },
+    good: { emoji: '🥙', name: 'Ролл в лаваше с курицей и овощами', portion: '300 г', kcal: 420, sugar: 5, fat: 12, salt: 1.4, fiber: 7 },
+    tip: 'Главный источник жира в шаурме — соус. Замените его на йогуртовый с зеленью.',
+  },
+  {
+    id: 'nuggets',
+    bad: { emoji: '🍗', name: 'Куриные наггетсы', portion: '150 г', kcal: 420, sugar: 1, fat: 26, salt: 1.5, fiber: 1 },
+    good: { emoji: '🍢', name: 'Курица в овсяной панировке из духовки', portion: '150 г', kcal: 260, sugar: 1, fat: 8, salt: 0.6, fiber: 2 },
+    tip: 'Панировка из овсяных хлопьев хрустит не хуже, а запекание вместо фритюра убирает лишний жир.',
+  },
+  {
+    id: 'dumplings',
+    bad: { emoji: '🥟', name: 'Магазинные пельмени с майонезом', portion: '280 г', kcal: 760, sugar: 2, fat: 45, salt: 2.6, fiber: 2 },
+    good: { emoji: '🥟', name: 'Домашние пельмени из индейки со сметаной 10%', portion: '280 г', kcal: 470, sugar: 3, fat: 15, salt: 1.3, fiber: 2 },
+    tip: 'Фарш из индейки и сметана 10% вместо майонеза сокращают жир втрое.',
+  },
+  {
+    id: 'cereal',
+    bad: { emoji: '🥣', name: 'Шоколадные шарики с молоком', portion: '40 г + 150 мл', kcal: 240, sugar: 22, fat: 6, salt: 0.3, fiber: 2 },
+    good: { emoji: '🥣', name: 'Овсянка с бананом', portion: '250 г', kcal: 200, sugar: 12, fat: 4, salt: 0.1, fiber: 5 },
+    tip: 'Сухие завтраки часто наполовину состоят из сахара. Каша с фруктом насыщает надолго.',
+  },
+  {
+    id: 'croissant',
+    bad: { emoji: '🥐', name: 'Круассан', portion: '70 г', kcal: 290, sugar: 6, fat: 16, salt: 0.7, fiber: 1.5 },
+    good: { emoji: '🍞', name: 'Цельнозерновой тост с творожным сыром', portion: '70 г', kcal: 170, sugar: 3, fat: 5, salt: 0.5, fiber: 3.5 },
+    tip: 'Слоёное тесто — это много сливочного масла. Тост с творожным сыром даёт белок и клетчатку.',
+  },
+  {
+    id: 'cookies',
+    bad: { emoji: '🍪', name: 'Печенье с шоколадом', portion: '50 г', kcal: 245, sugar: 16, fat: 12, salt: 0.3, fiber: 1 },
+    good: { emoji: '🍪', name: 'Домашнее овсяное печенье без сахара', portion: '50 г', kcal: 180, sugar: 6, fat: 7, salt: 0.1, fiber: 3 },
+    tip: 'В домашнем печенье сладость дают банан или финики — без добавленного сахара.',
+  },
+  {
+    id: 'chocobar',
+    bad: { emoji: '🍫', name: 'Шоколадный батончик', portion: '50 г', kcal: 240, sugar: 27, fat: 12, salt: 0.2, fiber: 1 },
+    good: { emoji: '🥜', name: 'Орехи с сухофруктами', portion: '40 г', kcal: 180, sugar: 12, fat: 11, salt: 0, fiber: 3 },
+    tip: 'Горсть орехов с изюмом или курагой — удобный перекус, который не вызывает резкого скачка сахара.',
+  },
+  {
+    id: 'icecream',
+    bad: { emoji: '🍨', name: 'Пломбир', portion: '100 г', kcal: 230, sugar: 21, fat: 15, salt: 0.1, fiber: 0 },
+    good: { emoji: '🍌', name: 'Банановое «мороженое» с ягодами', portion: '100 г', kcal: 95, sugar: 14, fat: 0.5, salt: 0, fiber: 2.5 },
+    tip: 'Замороженный банан, взбитый в блендере, по текстуре похож на мороженое — и обходится без сливок и сахара.',
+  },
+  {
+    id: 'popcorn',
+    bad: { emoji: '🍿', name: 'Карамельный попкорн', portion: '100 г', kcal: 400, sugar: 35, fat: 12, salt: 0.6, fiber: 4 },
+    good: { emoji: '🍿', name: 'Попкорн без масла и сахара', portion: '30 г', kcal: 115, sugar: 0.3, fat: 1.3, salt: 0, fiber: 4 },
+    tip: 'Сама кукуруза — цельное зерно. Вредным попкорн делают карамель, масло и соль.',
+  },
+  {
+    id: 'crackers',
+    bad: { emoji: '🧂', name: 'Солёные сухарики', portion: '50 г', kcal: 225, sugar: 2, fat: 9, salt: 1.8, fiber: 2 },
+    good: { emoji: '🍘', name: 'Цельнозерновые хлебцы', portion: '30 г', kcal: 110, sugar: 0.5, fat: 1, salt: 0.3, fiber: 4 },
+    tip: 'В пачке сухариков — около трети дневной нормы соли. Хлебцы хрустят так же, но без усилителей вкуса.',
+  },
+  {
+    id: 'energy',
+    bad: { emoji: '⚡', name: 'Энергетик', portion: '0,45 л', kcal: 205, sugar: 49, fat: 0, salt: 0.2, fiber: 0 },
+    good: { emoji: '🍵', name: 'Зелёный чай без сахара', portion: '0,45 л', kcal: 2, sugar: 0, fat: 0, salt: 0, fiber: 0 },
+    tip: 'Зелёный чай тоже бодрит за счёт кофеина, но без 12 ложек сахара и нагрузки на сердце.',
+  },
+  {
+    id: 'coffee',
+    bad: { emoji: '☕', name: 'Капучино с сиропом', portion: '0,4 л', kcal: 260, sugar: 35, fat: 9, salt: 0.2, fiber: 0 },
+    good: { emoji: '☕', name: 'Капучино без сиропа на нежирном молоке', portion: '0,4 л', kcal: 110, sugar: 10, fat: 0.5, salt: 0.2, fiber: 0 },
+    tip: 'Одна порция сиропа — это 2–3 ложки сахара. Попробуйте корицу: она добавляет сладковатый вкус без калорий.',
+  },
+  {
+    id: 'ketchup',
+    bad: { emoji: '🥫', name: 'Кетчуп', portion: '30 г', kcal: 30, sugar: 7, fat: 0, salt: 0.6, fiber: 0.2 },
+    good: { emoji: '🍅', name: 'Свежая сальса из помидоров', portion: '30 г', kcal: 10, sugar: 1.5, fat: 0.1, salt: 0.1, fiber: 0.5 },
+    tip: 'Магазинный кетчуп на четверть состоит из сахара. Сальса из помидоров, лука и зелени готовится за 5 минут.',
+  },
+  {
+    id: 'whitebread',
+    bad: { emoji: '🍞', name: 'Белый батон', portion: '2 ломтика, 60 г', kcal: 160, sugar: 3, fat: 2, salt: 0.6, fiber: 1.5 },
+    good: { emoji: '🍞', name: 'Цельнозерновой хлеб', portion: '60 г', kcal: 150, sugar: 2, fat: 2, salt: 0.5, fiber: 4.5 },
+    tip: 'Калорий почти столько же, но клетчатки втрое больше — чувство сытости держится дольше.',
+  }
+);
+
 window.SWAP_METRICS = [
   { key: 'kcal', label: 'Калории', unit: 'ккал', lessIsBetter: true },
   { key: 'sugar', label: 'Сахар', unit: 'г', lessIsBetter: true },

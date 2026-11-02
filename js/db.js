@@ -36,13 +36,15 @@
     [/password should be at least/i, 'Пароль слишком короткий — минимум 6 символов'],
     [/email not confirmed/i, 'Почта не подтверждена. Введите код из письма от Укропчика'],
     [/token has expired|otp.*(expired|invalid)|invalid.*otp/i, 'Код неверный или устарел. Запросите новый'],
-    [/provider is not enabled|unsupported provider/i, 'Вход через Google ещё не включён в настройках базы данных'],
+    [/only request this after|security purposes/i, 'Код уже отправлен. Повторно запросить можно через минуту'],
+    [/signups not allowed for otp|user not found/i, 'Аккаунт с такой почтой не найден'],
     [/error sending|sending (confirmation|recovery|magic)/i, 'Не удалось отправить письмо. Проверьте адрес почты или попробуйте позже'],
     [/email address .* is invalid|email_address_invalid/i, 'Такой адрес почты не принимается — проверьте его'],
     [/unable to validate email|invalid email|invalid format/i, 'Некорректный адрес почты'],
     [/rate limit|too many/i, 'Слишком много попыток. Попробуйте через несколько минут'],
     [/failed to fetch|networkerror|load failed/i, 'Нет связи с сервером. Проверьте интернет'],
-    [/row-level security|permission denied/i, 'Недостаточно прав для этого действия'],
+    [/row-level security|permission denied|нет доступа/i, 'Недостаточно прав для этого действия'],
+    [/could not find the function|function .* does not exist/i, 'Админ-панель ещё не настроена: выполните supabase/schema-3-admin.sql'],
   ];
 
   function humanError(err) {
@@ -94,11 +96,25 @@
       async signUp({ name, email, password }) {
         validateCredentials({ email, password });
         const data = await run(sb.auth.signUp({ email, password, options: { data: { name }, emailRedirectTo: pageUrl('login.html') } }));
+        // Supabase не сообщает об уже занятой почте явно: у такого «нового» пользователя пустой список identities
+        if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+          throw new Error('Аккаунт с этой почтой уже зарегистрирован. Войдите или восстановите пароль');
+        }
         if (data.session) rememberSession(true);
         return { needsConfirm: !data.session };
       },
-      async signIn({ email, password, remember = true }) {
+      /* вход в два шага: пароль, затем код из письма */
+      async signIn({ email, password }) {
         await run(sb.auth.signInWithPassword({ email, password }));
+        await sb.auth.signOut({ scope: 'local' });
+        await run(sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false } }));
+        return { needsCode: true };
+      },
+      async resendLoginCode(email) {
+        await run(sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false } }));
+      },
+      async verifyLoginCode(email, code, remember = true) {
+        await run(sb.auth.verifyOtp({ email, token: code, type: 'email' }));
         rememberSession(remember);
       },
       async signOut() {
@@ -113,12 +129,13 @@
           return null;
         }
         const u = session.user;
-        const profile = await run(sb.from('profiles').select('name, plan').eq('id', u.id).maybeSingle());
+        const profile = await run(sb.from('profiles').select('*').eq('id', u.id).maybeSingle());
         return {
           id: u.id,
           email: u.email,
           name: (profile && profile.name) || (u.user_metadata && u.user_metadata.name) || u.email,
           plan: (profile && profile.plan) || 'basic',
+          role: (profile && profile.role) || 'user',
         };
       },
       async updatePlan(plan) {
@@ -132,10 +149,6 @@
       async verifySignupCode(email, code) {
         await run(sb.auth.verifyOtp({ email, token: code, type: 'signup' }));
         rememberSession(true);
-      },
-      async signInWithGoogle() {
-        rememberSession(true);
-        await run(sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: pageUrl('login.html') } }));
       },
       async resetPassword(email) {
         await run(sb.auth.resetPasswordForEmail(email, { redirectTo: pageUrl('login.html') }));
@@ -185,6 +198,9 @@
       async reply(postId, body) {
         return run(sb.from('forum_replies').insert({ post_id: postId, body }).select().single());
       },
+      async removeReply(id) {
+        await run(sb.from('forum_replies').delete().eq('id', id));
+      },
     },
 
     contact: {
@@ -222,7 +238,7 @@
         validateCredentials({ email, password });
         const users = store.get('users', {});
         const key = email.trim().toLowerCase();
-        if (users[key]) throw new Error('Пользователь с такой почтой уже зарегистрирован');
+        if (users[key]) throw new Error('Аккаунт с этой почтой уже зарегистрирован. Войдите или восстановите пароль');
         users[key] = { id: newId(), name: name.trim(), email: key, hash: await hash(password), plan: 'basic' };
         store.set('users', users);
         store.set('session', key);
@@ -244,7 +260,7 @@
         const key = store.get('session');
         if (!key || !sessionAllowed()) return null;
         const user = store.get('users', {})[key];
-        return user ? { id: user.id, email: user.email, name: user.name, plan: user.plan } : null;
+        return user ? { id: user.id, email: user.email, name: user.name, plan: user.plan, role: user.role || 'user' } : null;
       },
       async updatePlan(plan) {
         const key = store.get('session');
@@ -258,9 +274,8 @@
       },
       async resendConfirmation() {},
       async verifySignupCode() {},
-      async signInWithGoogle() {
-        throw new Error('В демо-режиме вход через Google недоступен — подключите базу данных');
-      },
+      async resendLoginCode() {},
+      async verifyLoginCode() {},
       async updatePassword() {},
       onPasswordRecovery() {},
     },
@@ -308,6 +323,9 @@
       },
       async replies(postId) {
         return store.get('forum_replies', []).filter((r) => r.post_id === postId);
+      },
+      async removeReply(id) {
+        store.set('forum_replies', store.get('forum_replies', []).filter((r) => r.id !== id));
       },
       async reply(postId, body) {
         const user = await local.auth.getUser();
@@ -432,6 +450,91 @@
     },
   };
 
+  /* ===================== Администрирование ===================== */
+  /* Права проверяет сама база (функции admin_* в schema-3-admin.sql), сайт только показывает данные */
+
+  const remoteAdmin = {
+    async claim(password) {
+      return run(sb.rpc('admin_claim', { password }));
+    },
+    async stats() {
+      return run(sb.rpc('admin_stats'));
+    },
+    async users() {
+      return run(sb.rpc('admin_users'));
+    },
+    async setPlan(id, plan) {
+      await run(sb.rpc('admin_set_plan', { target: id, new_plan: plan }));
+    },
+    async setRole(id, role) {
+      await run(sb.rpc('admin_set_role', { target: id, new_role: role }));
+    },
+    async deleteUser(id) {
+      await run(sb.rpc('admin_delete_user', { target: id }));
+    },
+    async messages() {
+      return run(sb.from('contact_messages').select('*').order('created_at', { ascending: false }));
+    },
+    async deleteMessage(id) {
+      await run(sb.from('contact_messages').delete().eq('id', id));
+    },
+  };
+
+  /* в демо-режиме пароль админки — admin */
+  const localAdmin = {
+    async claim(password) {
+      const key = store.get('session');
+      const users = store.get('users', {});
+      if (!key || !users[key]) throw new Error('Сначала войдите в аккаунт');
+      if (password !== 'admin') return false;
+      users[key].role = 'admin';
+      store.set('users', users);
+      return true;
+    },
+    async stats() {
+      const users = Object.values(store.get('users', {}));
+      return {
+        users: users.length, confirmed: users.length, new_week: users.length,
+        posts: store.get('forum_posts', []).length, replies: store.get('forum_replies', []).length,
+        rations: store.get('rations', []).length, diary: store.get('diary', []).length,
+        messages: store.get('messages', []).length,
+      };
+    },
+    async users() {
+      return Object.values(store.get('users', {})).map((u) => ({
+        id: u.id, email: u.email, name: u.name, plan: u.plan, role: u.role || 'user',
+        created_at: null, confirmed: true, last_sign_in_at: null,
+      }));
+    },
+    async setPlan(id, plan) {
+      const users = store.get('users', {});
+      Object.values(users).forEach((u) => { if (u.id === id) u.plan = plan; });
+      store.set('users', users);
+    },
+    async setRole(id, role) {
+      const users = store.get('users', {});
+      Object.values(users).forEach((u) => { if (u.id === id) u.role = role; });
+      store.set('users', users);
+    },
+    async deleteUser(id) {
+      const users = store.get('users', {});
+      const me = store.get('session');
+      Object.keys(users).forEach((k) => {
+        if (users[k].id === id) {
+          if (k === me) throw new Error('Нельзя удалить свой аккаунт из админки');
+          delete users[k];
+        }
+      });
+      store.set('users', users);
+    },
+    async messages() {
+      return store.get('messages', []).map((m, i) => ({ id: String(i), ...m })).reverse();
+    },
+    async deleteMessage(id) {
+      store.set('messages', store.get('messages', []).filter((_, i) => String(i) !== String(id)));
+    },
+  };
+
   window.DB = {
     mode: useSupabase ? 'supabase' : 'demo',
     store,
@@ -440,6 +543,7 @@
     weights,
     calcs,
     diary,
+    admin: useSupabase ? remoteAdmin : localAdmin,
     async isCloud() { return Boolean(await remoteUserId()); },
   };
 })();

@@ -12,6 +12,8 @@
   form.topic.innerHTML = TOPICS.map((t) => `<option>${t}</option>`).join('');
 
   let posts = [];
+  const isLong = (text) => text.length > 600 || text.split('\n').length > 8;
+  const canDelete = (item) => user && (user.id === item.author_id || user.role === 'admin');
   let user = null;
   const open = new Set();
 
@@ -43,10 +45,11 @@
           <span>👤 ${esc(p.author_name)}</span>
           <span>${formatDate(p.created_at)}</span>
         </div>
-        <div class="post-body">${esc(p.body)}</div>
+        <div class="post-body${isLong(p.body) ? ' clamped' : ''}">${esc(p.body)}</div>
+        ${isLong(p.body) ? '<button class="link-btn" type="button" data-expand>Показать полностью</button>' : ''}
         <div class="post-foot">
           <button class="btn btn-ghost btn-sm" type="button" data-toggle>💬 Ответы (${p.replies_count})</button>
-          ${user && user.id === p.author_id ? '<button class="btn btn-danger btn-sm" type="button" data-delete>Удалить</button>' : ''}
+          ${canDelete(p) ? '<button class="btn btn-danger btn-sm" type="button" data-delete>Удалить</button>' : ''}
         </div>
         <div class="replies hidden"></div>
       </article>`).join('');
@@ -66,6 +69,7 @@
         <div class="reply">
           <div class="post-meta"><span>👤 ${esc(r.author_name)}</span><span>${formatDate(r.created_at)}</span></div>
           <div class="post-body">${esc(r.body)}</div>
+          ${canDelete(r) ? `<button class="link-btn" type="button" data-del-reply="${r.id}">Удалить ответ</button>` : ''}
         </div>`).join('') + (user
         ? `<form class="reply-form" novalidate>
              <label class="sr-only" for="reply-${card.dataset.id}">Ваш ответ</label>
@@ -89,6 +93,23 @@
       } else {
         open.add(id);
         loadReplies(card);
+      }
+    }
+    const expand = e.target.closest('[data-expand]');
+    if (expand) {
+      const body = card.querySelector('.post-body');
+      body.classList.toggle('clamped');
+      expand.textContent = body.classList.contains('clamped') ? 'Показать полностью' : 'Свернуть';
+    }
+    const delReply = e.target.closest('[data-del-reply]');
+    if (delReply && confirm('Удалить этот ответ?')) {
+      try {
+        await DB.forum.removeReply(delReply.dataset.delReply);
+        toast('Ответ удалён');
+        open.add(card.dataset.id);
+        load();
+      } catch (err) {
+        toast(err.message, 'error');
       }
     }
     if (e.target.closest('[data-delete]') && confirm('Удалить тему вместе с ответами?')) {

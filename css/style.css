@@ -877,5 +877,21 @@ p { margin: 0 0 1em; }
 /* вход через Google и ввод кода */
 .divider { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: .9rem; }
 .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--field-line); }
-[data-google] { color: var(--ink); }
 .code-input { font-size: 1.6rem; letter-spacing: .4em; text-align: center; font-weight: 700; }
+
+/* форум: длинные слова и тексты не выходят за рамки */
+.post, .reply { min-width: 0; overflow: hidden; }
+.post h3, .post-body, .reply .post-body, .post-meta, .saved-list strong {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.post-body.clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 8;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.post [data-expand] { margin-top: 6px; }
+.reply [data-del-reply] { margin-top: 4px; font-size: .85rem; color: var(--danger); }
+.forum-layout > aside { position: sticky; top: calc(var(--header-h) + 20px); }
+@media (max-width: 1240px) { .forum-layout > aside { position: static; } }

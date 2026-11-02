@@ -8,7 +8,10 @@
   function show(step) {
     if (!STEPS.includes(step)) step = 'login';
     if (step === 'confirm' && !pendingEmail()) step = 'register';
-    if (step === 'confirm') document.getElementById('confirm-email').textContent = pendingEmail();
+    if (step === 'confirm') {
+      document.getElementById('confirm-email').textContent = pendingEmail();
+      fillConfirmTexts();
+    }
     if (step === 'plan' && !user) {
       toast('Сначала войдите или зарегистрируйтесь', 'error');
       step = 'login';
@@ -80,12 +83,27 @@
     return '';
   }
 
-  /* почта, на которую отправлен код подтверждения */
-  const pendingEmail = () => DB.store.get('pending_email', '');
-  function askForCode(email) {
-    DB.store.set('pending_email', email);
+  /*
+   * Ожидающий код: { email, mode, remember }
+   *   mode 'signup' — подтверждение почты после регистрации
+   *   mode 'login'  — код при входе в аккаунт
+   */
+  const pending = () => DB.store.get('pending_code', null) || {};
+  const pendingEmail = () => pending().email || '';
+  function askForCode(email, mode = 'signup', remember = true) {
+    DB.store.set('pending_code', { email, mode, remember });
     if (location.hash === '#confirm') show('confirm');
     else location.hash = 'confirm';
+  }
+  function fillConfirmTexts() {
+    const login = pending().mode === 'login';
+    document.getElementById('confirm-title').textContent = login ? 'Код для входа' : 'Подтвердите почту';
+    document.getElementById('confirm-lead').textContent = login
+      ? 'Введите его ниже, чтобы войти в аккаунт.'
+      : 'Введите его ниже — так мы убедимся, что почта настоящая.';
+    const back = document.getElementById('confirm-back');
+    back.href = login ? '#login' : '#register';
+    back.textContent = login ? 'Войти с другой почтой' : 'Изменить почту';
   }
 
   function lock(form, locked) {
@@ -99,12 +117,16 @@
     const err = loginForm.querySelector('.form-error');
     err.textContent = '';
     lock(loginForm, true);
+    const email = loginForm.email.value.trim();
+    const remember = loginForm.remember.checked;
     try {
-      await DB.auth.signIn({
-        email: loginForm.email.value.trim(),
-        password: loginForm.password.value,
-        remember: loginForm.remember.checked,
-      });
+      const result = await DB.auth.signIn({ email, password: loginForm.password.value, remember });
+      if (result && result.needsCode) {
+        lock(loginForm, false);
+        toast('Код для входа отправлен на почту');
+        askForCode(email, 'login', remember);
+        return;
+      }
       toast('С возвращением!');
       location.href = 'diet.html';
     } catch (error) {
@@ -115,7 +137,14 @@
         btn.className = 'link-btn';
         btn.textContent = 'Ввести код';
         btn.style.marginLeft = '8px';
-        btn.addEventListener('click', () => askForCode(loginForm.email.value.trim()));
+        btn.addEventListener('click', async () => {
+          try {
+            await DB.auth.resendConfirmation(email);
+          } catch (e2) {
+            toast(e2.message, 'error');
+          }
+          askForCode(email, 'signup');
+        });
         err.appendChild(btn);
       }
       lock(loginForm, false);
@@ -249,8 +278,16 @@
     err.textContent = '';
     lock(confirmForm, true);
     try {
-      await DB.auth.verifySignupCode(pendingEmail(), code);
-      DB.store.remove('pending_email');
+      const { email, mode, remember } = pending();
+      if (mode === 'login') {
+        await DB.auth.verifyLoginCode(email, code, remember !== false);
+        DB.store.remove('pending_code');
+        toast('С возвращением!');
+        location.href = 'diet.html';
+        return;
+      }
+      await DB.auth.verifySignupCode(email, code);
+      DB.store.remove('pending_code');
       location.hash = 'plan';
       location.reload();
     } catch (error) {
@@ -265,25 +302,13 @@
     const btn = e.currentTarget;
     btn.disabled = true;
     try {
-      await DB.auth.resendConfirmation(pendingEmail());
+      if (pending().mode === 'login') await DB.auth.resendLoginCode(pendingEmail());
+      else await DB.auth.resendConfirmation(pendingEmail());
       toast('Новый код отправлен — проверьте почту и папку «Спам»');
     } catch (error) {
       toast(error.message, 'error');
     }
     setTimeout(() => { btn.disabled = false; }, 60000);
-  });
-
-  /* ---------- вход через Google ---------- */
-  document.querySelectorAll('[data-google]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      btn.disabled = true;
-      try {
-        await DB.auth.signInWithGoogle();
-      } catch (error) {
-        toast(error.message, 'error');
-        btn.disabled = false;
-      }
-    });
   });
 
   userReady.then((u) => {
