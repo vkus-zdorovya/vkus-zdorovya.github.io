@@ -21,6 +21,8 @@ window.APP_CONFIG = {
   SUPABASE_URL: 'https://afzroggvqgadcozukiwy.supabase.co',
   SUPABASE_PROXY: '/sb',
   DIRECT_HOSTS: ['github.io'],
+  // общая почта сайта: с неё уходят ответы из админки
+  SITE_EMAIL: 'info.oooukropchik@gmail.com',
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmenJvZ2d2cWdhZGNvenVraXd5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMxNzEwNDUsImV4cCI6MjEwODc0NzA0NX0.JVwHKHXWD1iD0MVjo2dGut7WWOlYTSZ54qlIpOpqhPc',
 };
 

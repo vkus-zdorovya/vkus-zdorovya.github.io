@@ -20,12 +20,14 @@
       box.innerHTML = `
         <div class="profile-banner">${p.banner_url ? `<img src="${esc(p.banner_url)}" alt="Баннер профиля">` : ''}</div>
         <div class="profile-row">
-          ${avatarHtml(p.name, p.avatar_url, 'avatar-lg')}
+          ${avatarHtml(p.name, p.avatar_url, 'avatar-lg zoomable')}
           <div>
             <h1 style="font-size:1.8rem;margin-bottom:4px">${esc(p.name)}</h1>
             ${p.created_at ? `<div class="muted small">С нами с ${esc(new Date(p.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }))}</div>` : ''}
           </div>
-          ${me && me.id === id ? '<a class="btn btn-ghost btn-sm" href="account.html">Редактировать</a>' : ''}
+          ${me && me.id === id
+            ? '<a class="btn btn-ghost btn-sm" href="account.html">Редактировать</a>'
+            : `<a class="btn btn-primary btn-sm" href="${me ? `messages.html?to=${encodeURIComponent(id)}` : 'login.html'}">✉️ Написать</a>`}
         </div>`;
 
       const posts = await DB.forum.list(id);

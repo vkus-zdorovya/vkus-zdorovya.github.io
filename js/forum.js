@@ -17,7 +17,7 @@
   function author(item) {
     const info = authors[item.author_id] || {};
     const name = info.name || item.author_name;
-    return `<a class="post-author" href="profile.html?id=${encodeURIComponent(item.author_id)}">${UI.avatarHtml(name, info.avatar_url, 'avatar-sm')}${esc(name)}</a>`;
+    return `<a class="post-author" href="profile.html?id=${encodeURIComponent(item.author_id)}">${UI.avatarHtml(name, info.avatar_url, 'avatar-md zoomable')}${esc(name)}</a>`;
   }
   const isAdmin = () => user && user.role === 'admin';
   const isMuted = () => user && user.muted_until && new Date(user.muted_until) > new Date();
@@ -78,11 +78,15 @@
     try {
       const replies = await DB.forum.replies(card.dataset.id);
       Object.assign(authors, await DB.publicProfiles(replies.map((r) => r.author_id)));
+      card.replyList = replies;
       box.innerHTML = replies.map((r) => `
-        <div class="reply">
-          <div class="post-meta">${author(r)}<span>${formatDate(r.created_at)}</span></div>
+        <div class="reply${r.pinned ? ' pinned' : ''}">
+          <div class="post-meta">${author(r)}<span>${formatDate(r.created_at)}</span>${r.pinned ? '<span class="badge">📌 Закреплён</span>' : ''}</div>
           <div class="post-body">${esc(r.body)}</div>
-          ${canDelete(r) ? `<button class="link-btn" type="button" data-del-reply="${r.id}">Удалить ответ</button>` : ''}
+          <div class="reply-actions">
+            ${isAdmin() ? `<button class="link-btn" type="button" data-pin-reply="${r.id}">${r.pinned ? 'Открепить' : '📌 Закрепить'}</button>` : ''}
+            ${canDelete(r) ? `<button class="link-btn danger" type="button" data-del-reply="${r.id}">Удалить ответ</button>` : ''}
+          </div>
         </div>`).join('') + (user && !isMuted()
         ? `<form class="reply-form" novalidate>
              <label class="sr-only" for="reply-${card.dataset.id}">Ваш ответ</label>
@@ -115,6 +119,17 @@
       const body = card.querySelector('.post-body');
       body.classList.toggle('clamped');
       expand.textContent = body.classList.contains('clamped') ? 'Показать полностью' : 'Свернуть';
+    }
+    const pinReply = e.target.closest('[data-pin-reply]');
+    if (pinReply) {
+      const r = (card.replyList || []).find((x) => String(x.id) === pinReply.dataset.pinReply);
+      try {
+        await DB.admin.pinReply(r.id, !r.pinned);
+        toast(r.pinned ? 'Комментарий откреплён' : 'Комментарий закреплён');
+        loadReplies(card);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
     }
     const delReply = e.target.closest('[data-del-reply]');
     if (delReply && confirm('Удалить этот ответ?')) {

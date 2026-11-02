@@ -102,7 +102,8 @@
       console.warn(err);
     }
     if (user) {
-      box.innerHTML = `<a class="user-chip post-author" href="account.html" title="${esc(user.email)}">${avatarHtml(user.name, user.avatar_url, 'avatar-sm')}<span class="chip-name">${esc(user.name)}</span></a>
+      box.innerHTML = `<a class="icon-btn dm-btn${page === 'messages.html' ? ' active' : ''}" href="messages.html" aria-label="Личные сообщения" title="Личные сообщения">✉️<span class="count-badge hidden" id="dm-badge"></span></a>
+        <a class="user-chip post-author" href="account.html" title="${esc(user.email)}">${avatarHtml(user.name, user.avatar_url, 'avatar-sm')}<span class="chip-name">${esc(user.name)}</span></a>
         <button class="btn btn-ghost btn-sm" type="button" id="logout-btn">Выйти</button>`;
       if (user.role === 'admin') {
         const nav = document.getElementById('nav');
@@ -110,12 +111,45 @@
           nav.insertAdjacentHTML('beforeend', `<a href="admin.html"${page === 'admin.html' ? ' class="active" aria-current="page"' : ''}>Админ</a>`);
         }
       }
+      refreshUnread();
+      setInterval(() => { if (!document.hidden) refreshUnread(); }, 60000);
       box.querySelector('#logout-btn').addEventListener('click', async () => {
         await DB.auth.signOut();
         location.reload();
       });
     }
     return user;
+  }
+
+  /* число непрочитанных личных сообщений на значке ✉️ */
+  async function refreshUnread() {
+    const badge = document.getElementById('dm-badge');
+    if (!badge || !DB.dm) return;
+    let n = 0;
+    try { n = await DB.dm.unread(); } catch { n = 0; }
+    badge.textContent = n > 99 ? '99+' : String(n);
+    badge.classList.toggle('hidden', !n);
+  }
+
+  /* нажатие на аватарку с фото открывает её крупно */
+  function initLightbox() {
+    document.addEventListener('click', (e) => {
+      const av = e.target.closest('.avatar.zoomable');
+      const img = av && av.querySelector('img');
+      if (!img) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const box = document.createElement('div');
+      box.className = 'lightbox';
+      box.setAttribute('role', 'dialog');
+      box.setAttribute('aria-label', 'Аватарка');
+      box.innerHTML = `<img src="${esc(img.src)}" alt=""><button class="lightbox-close" type="button" aria-label="Закрыть">✕</button>`;
+      const close = () => { box.remove(); document.removeEventListener('keydown', onKey); };
+      const onKey = (ev) => { if (ev.key === 'Escape') close(); };
+      box.addEventListener('click', close);
+      document.addEventListener('keydown', onKey);
+      document.body.appendChild(box);
+    }, true);
   }
 
   function renderFooter() {
@@ -327,11 +361,12 @@
   initPWA();
   const userReady = renderAuthState();
   initReveal();
+  initLightbox();
   initContactForm();
   scheduleReminder();
 
   window.UI = {
-    esc, toast, formatDate, userReady, avatarHtml,
+    esc, toast, formatDate, userReady, avatarHtml, refreshUnread,
     setTheme,
     theme: () => DB.store.get('theme') || 'system',
     install, canInstall: () => Boolean(installEvent), isStandalone, isIOS,

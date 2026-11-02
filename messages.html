@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Сообщения — ВкусЗдоровья</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#2d5f3b">
+  <link rel="icon" href="img/logo.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="ВкусЗдоровья">
+  <script src="js/theme.js"></script>
+  <link rel="preload" href="fonts/inter-cyrillic-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="css/style.css">
+  <script defer src="js/vendor/supabase.js"></script>
+  <script defer src="js/config.js"></script>
+  <script defer src="js/db.js"></script>
+  <script defer src="js/data.js"></script>
+  <script defer src="js/main.js"></script>
+  <script defer src="js/messages.js"></script>
+</head>
+<body>
+  <header id="site-header"></header>
+
+  <main>
+    <section class="container" style="padding:clamp(20px,4vw,40px) 0 48px">
+      <div class="card tool-card hidden" id="dm-need-login">
+        <h2 style="font-size:1.5rem">Войдите, чтобы переписываться</h2>
+        <p class="muted">Личные сообщения доступны зарегистрированным участникам.</p>
+        <a class="btn btn-primary" href="login.html">Войти</a>
+      </div>
+
+      <div class="dm-layout hidden" id="dm">
+        <aside class="card dm-list">
+          <h1 class="dm-title">Сообщения</h1>
+          <p class="small muted">Чтобы начать переписку, откройте профиль участника на <a href="forum.html">форуме</a> и нажмите «✉️ Написать».</p>
+          <div id="dm-conversations"><p class="muted small">Загрузка…</p></div>
+        </aside>
+
+        <section class="card dm-chat" id="dm-chat">
+          <div class="dm-empty muted" id="dm-empty">Выберите диалог слева</div>
+          <div class="dm-chat-inner hidden" id="dm-chat-inner">
+            <div class="dm-chat-head">
+              <button class="icon-btn dm-back" type="button" id="dm-back" aria-label="Назад к диалогам">←</button>
+              <a class="post-author" id="dm-peer" href="#"></a>
+            </div>
+            <div class="dm-messages" id="dm-messages" aria-live="polite"></div>
+            <form class="dm-form" id="dm-form" novalidate>
+              <label class="sr-only" for="dm-input">Сообщение</label>
+              <textarea class="textarea" id="dm-input" rows="1" maxlength="2000" placeholder="Сообщение…"></textarea>
+              <button class="btn btn-primary" type="submit" aria-label="Отправить">➤</button>
+            </form>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <footer id="site-footer"></footer>
+</body>
+</html>

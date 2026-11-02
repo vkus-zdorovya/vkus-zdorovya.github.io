@@ -21,9 +21,9 @@
       return;
     }
     box.innerHTML = `
-      <div class="profile-banner" id="banner-preview">${user.banner_url ? `<img src="${esc(user.banner_url)}" alt="Баннер профиля">` : ''}</div>
+      <div class="profile-banner" id="banner-preview">${(user.banner_pending_url || user.banner_url) ? `<img src="${esc(user.banner_pending_url || user.banner_url)}" alt="Баннер профиля">` : ''}${user.banner_pending_url ? '<span class="pending-badge">⏳ на проверке</span>' : ''}</div>
       <div class="profile-row">
-        <span id="avatar-preview">${UI.avatarHtml(user.name, user.avatar_url, 'avatar-lg')}</span>
+        <span id="avatar-preview">${UI.avatarHtml(user.name, user.avatar_pending_url || user.avatar_url, 'avatar-lg')}</span>
         <div>
           <h2 style="font-size:1.5rem;margin-bottom:4px">${esc(user.name)}</h2>
           <div class="muted">${esc(user.email)}</div>
@@ -33,6 +33,7 @@
           ].filter(Boolean).join('<br>')}</p>
           ${user.muted_until && new Date(user.muted_until) > new Date() ? `<p class="small" style="color:var(--danger);margin:6px 0 0">🔇 Мут до ${esc(new Date(user.muted_until).toLocaleString('ru-RU'))}</p>` : ''}
           <a class="small" href="profile.html?id=${encodeURIComponent(user.id)}">Мой публичный профиль →</a>
+          <a class="small" href="messages.html" style="margin-left:12px">✉️ Личные сообщения</a>
         </div>
         <button class="btn btn-danger btn-sm" type="button" id="logout2">Выйти</button>
       </div>
@@ -51,7 +52,7 @@
           <div class="inline-form">
             <label class="btn btn-ghost" for="avatar-file" style="cursor:pointer">📷 Выбрать фото</label>
             <input type="file" id="avatar-file" accept="image/jpeg,image/png,image/webp,image/gif" class="sr-only">
-            ${user.avatar_url ? '<button class="btn btn-ghost" type="button" data-remove="avatar">Удалить фото</button>' : ''}
+            ${(user.avatar_url || user.avatar_pending) ? '<button class="btn btn-ghost" type="button" data-remove="avatar">Удалить фото</button>' : ''}
           </div>
           <span class="small muted">JPG, PNG, WebP или GIF (до 2 МБ). ${user.role === 'admin' ? 'Вы администратор — фото появится сразу.' : 'Отправляется на проверку сразу после выбора и появится после одобрения.'}</span>
         </div>
@@ -61,7 +62,7 @@
           <div class="inline-form">
             <label class="btn btn-ghost" for="banner-file" style="cursor:pointer">🖼 Выбрать баннер</label>
             <input type="file" id="banner-file" accept="image/jpeg,image/png,image/webp,image/gif" class="sr-only">
-            ${user.banner_url ? '<button class="btn btn-ghost" type="button" data-remove="banner">Удалить баннер</button>' : ''}
+            ${(user.banner_url || user.banner_pending) ? '<button class="btn btn-ghost" type="button" data-remove="banner">Удалить баннер</button>' : ''}
           </div>
           <span class="small muted">Широкая картинка вверху профиля, лучше 1500×500. Можно GIF до 5 МБ. ${user.role === 'admin' ? 'Появится сразу.' : 'Тоже проходит проверку.'}</span>
         </div>
@@ -126,7 +127,7 @@
           if (kind === 'avatar') {
             box.querySelector('#avatar-preview').innerHTML = `<span class="avatar avatar-lg"><img src="${url}" alt="Новое фото"></span>`;
           } else {
-            box.querySelector('#banner-preview').innerHTML = `<img src="${url}" alt="Новый баннер">`;
+            box.querySelector('#banner-preview').innerHTML = `<img src="${url}" alt="Новый баннер"><span class="pending-badge">⏳ на проверке</span>`;
           }
           const status = box.querySelector('#avatar-status');
           const line = `⏳ ${kind === 'avatar' ? 'Новое фото' : 'Новый баннер'} на проверке у администратора`;

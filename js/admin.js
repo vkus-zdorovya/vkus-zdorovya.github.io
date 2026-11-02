@@ -191,13 +191,20 @@
       media = await DB.admin.mediaRequests();
       $('avatars-count').textContent = media.length ? `(${media.length})` : '';
       box.innerHTML = media.length ? media.map((r, i) => `
-        <div class="card avatar-request" data-i="${i}">
-          <span class="tag">${r.kind === 'banner' ? '🖼 Баннер' : '👤 Фото профиля'}</span>
-          ${r.kind === 'banner'
-            ? `<img class="media-request-banner" src="${esc(r.pending_url)}" alt="Новый баннер">`
-            : `<span class="avatar avatar-lg"><img src="${esc(r.pending_url)}" alt="Новое фото"></span>`}
-          <div><b>${esc(r.name || '—')}</b><br><span class="small muted">${esc(r.email)}</span></div>
-          <div class="inline-form" style="justify-content:center">
+        <div class="card avatar-request${r.kind === 'banner' ? ' is-banner' : ''}" data-i="${i}">
+          <div class="avatar-request-head">
+            <span class="tag">${r.kind === 'banner' ? '🖼 Баннер профиля' : '👤 Фото профиля'}</span>
+          </div>
+          <div class="avatar-request-preview">
+            ${r.kind === 'banner'
+              ? `<img class="media-request-banner" src="${esc(r.pending_url)}" alt="Новый баннер">`
+              : `<span class="avatar avatar-xl"><img src="${esc(r.pending_url)}" alt="Новое фото"></span>`}
+          </div>
+          <div class="avatar-request-user">
+            <b>${esc(r.name || '—')}</b>
+            <span class="small muted">${esc(r.email)}</span>
+          </div>
+          <div class="avatar-request-actions">
             <button class="btn btn-primary btn-sm" type="button" data-approve>✓ Одобрить</button>
             <button class="btn btn-danger btn-sm" type="button" data-reject>✕ Отклонить</button>
           </div>
@@ -288,11 +295,15 @@
     const box = card.querySelector('.replies');
     box.classList.remove('hidden');
     const replies = await DB.forum.replies(card.dataset.id);
+    card.replyList = replies;
     box.innerHTML = replies.length ? replies.map((r) => `
-      <div class="reply">
-        <div class="post-meta"><span>👤 ${esc(r.author_name)}</span><span>${fmt(r.created_at)}</span></div>
+      <div class="reply${r.pinned ? ' pinned' : ''}">
+        <div class="post-meta">${r.pinned ? '<span class="badge">📌 Закреплён</span>' : ''}<span>👤 ${esc(r.author_name)}</span><span>${fmt(r.created_at)}</span></div>
         <div class="post-body">${esc(r.body)}</div>
-        <button class="link-btn" type="button" data-del-reply="${esc(String(r.id))}">Удалить ответ</button>
+        <div class="reply-actions">
+          <button class="link-btn" type="button" data-pin-reply="${esc(String(r.id))}">${r.pinned ? 'Открепить' : '📌 Закрепить'}</button>
+          <button class="link-btn danger" type="button" data-del-reply="${esc(String(r.id))}">Удалить ответ</button>
+        </div>
       </div>`).join('') : '<p class="small muted">Ответов нет.</p>';
   }
 
@@ -312,6 +323,13 @@
         toast('Тема удалена');
         loadForum();
       }
+      const pinReply = e.target.closest('[data-pin-reply]');
+      if (pinReply) {
+        const r = (card.replyList || []).find((x) => String(x.id) === pinReply.dataset.pinReply);
+        await DB.admin.pinReply(r.id, !r.pinned);
+        toast(r.pinned ? 'Комментарий откреплён' : 'Комментарий закреплён');
+        await showReplies(card);
+      }
       const delReply = e.target.closest('[data-del-reply]');
       if (delReply && confirm('Удалить ответ?')) {
         await DB.forum.removeReply(delReply.dataset.delReply);
@@ -325,16 +343,18 @@
 
   /* ---------- сообщения ---------- */
   /*
-   * Ответ пишется прямо в админке и открывается в Gmail в браузере
-   * (с ящика сайта) — почтовая программа на компьютере не нужна.
+   * Ответ уходит с общей почты сайта через функцию Supabase admin-reply.
+   * Если функция ещё не подключена — письмо открывается в Gmail под общей почтой.
    */
 
   let messages = [];
   const SUBJECT = 'ВкусЗдоровья: ответ на ваше сообщение';
+  const SITE_EMAIL = (window.APP_CONFIG && APP_CONFIG.SITE_EMAIL) || '';
 
   function gmailLink(m, text) {
     const quote = `\n\n— — —\n${m.name} писал(а) ${fmt(m.created_at)}:\n${m.message}`;
     const params = new URLSearchParams({ view: 'cm', fs: '1', to: m.email, su: SUBJECT, body: (text || '') + quote });
+    if (SITE_EMAIL) params.set('authuser', SITE_EMAIL); // письмо открывается в ящике сайта, а не в личном
     return 'https://mail.google.com/mail/?' + params.toString();
   }
 
@@ -345,31 +365,33 @@
       box.innerHTML = messages.length ? messages.map((m) => `
         <article class="card post${m.answered_at ? ' answered' : ''}" data-id="${esc(String(m.id))}">
           <div class="post-meta">
-            ${m.answered_at ? `<span class="badge">✓ Отвечено ${fmt(m.answered_at)}</span>` : '<span class="badge">Новое</span>'}
+            ${m.answered_at ? `<span class="badge">✓ Отвечено ${fmt(m.answered_at)}</span>` : '<span class="badge badge-new">Новое</span>'}
             <span>👤 ${esc(m.name)}</span>
             <span>${esc(m.email)}</span>
             <span>${fmt(m.created_at)}</span>
           </div>
           <div class="post-body">${esc(m.message)}</div>
+          ${m.reply_text ? `<div class="reply sent-reply"><div class="post-meta"><span>↩️ Ваш ответ</span></div><div class="post-body">${esc(m.reply_text)}</div></div>` : ''}
           <div class="reply-box">
             <label class="sr-only" for="reply-${esc(String(m.id))}">Текст ответа</label>
-            <textarea class="textarea" id="reply-${esc(String(m.id))}" data-reply-text placeholder="Текст ответа…" style="min-height:90px"></textarea>
+            <textarea class="textarea" id="reply-${esc(String(m.id))}" data-reply-text placeholder="Текст ответа… Письмо уйдёт с ${esc(SITE_EMAIL || 'почты сайта')}" style="min-height:90px"></textarea>
           </div>
           <div class="post-foot">
-            <button class="btn btn-primary btn-sm" type="button" data-gmail>✉️ Ответить через Gmail</button>
-            <button class="btn btn-ghost btn-sm" type="button" data-copy>Скопировать адрес и текст</button>
-            ${m.answered_at ? '' : '<button class="btn btn-ghost btn-sm" type="button" data-answered>Отметить «Отвечено»</button>'}
+            <button class="btn btn-primary btn-sm" type="button" data-send>✉️ Отправить ответ</button>
+            <button class="btn btn-ghost btn-sm" type="button" data-gmail>Открыть в Gmail</button>
+            <button class="btn btn-ghost btn-sm" type="button" data-copy>Скопировать</button>
+            ${m.answered_at ? '' : '<button class="btn btn-ghost btn-sm" type="button" data-answered>✓ Отметить «Отвечено»</button>'}
             <button class="btn btn-danger btn-sm" type="button" data-del-msg>Удалить</button>
           </div>
         </article>`).join('') : '<div class="card muted center">Сообщений нет.</div>';
     });
   }
 
-  async function markAnswered(id, silent) {
+  async function markAnswered(id, reply, silent) {
     try {
-      await DB.admin.markAnswered(id);
+      await DB.admin.markAnswered(id, reply);
       if (!silent) toast('Отмечено как отвеченное');
-      loadMessages();
+      await loadMessages();
     } catch (error) {
       toast(error.message, 'error');
     }
@@ -379,22 +401,53 @@
     const card = e.target.closest('.post');
     if (!card) return;
     const m = messages.find((x) => String(x.id) === card.dataset.id);
+    if (!m) return;
     const text = card.querySelector('[data-reply-text]').value.trim();
 
+    const sendBtn = e.target.closest('[data-send]');
+    if (sendBtn) {
+      if (!text) {
+        toast('Напишите текст ответа', 'error');
+        return;
+      }
+      sendBtn.disabled = true;
+      sendBtn.textContent = '⏳ Отправляем…';
+      try {
+        await DB.admin.sendReply(m.id, text);
+        toast(`Ответ отправлен на ${m.email}`);
+        await loadMessages();
+      } catch (error) {
+        sendBtn.disabled = false;
+        sendBtn.textContent = '✉️ Отправить ответ';
+        if (error.noFunction) {
+          toast('Отправка с сайта ещё не подключена — открываем Gmail с почтой сайта', 'error');
+          window.open(gmailLink(m, text), '_blank', 'noopener');
+          if (confirm('Когда отправите письмо в Gmail, отметить сообщение как отвеченное?')) markAnswered(m.id, text, true);
+        } else {
+          toast(error.message, 'error');
+        }
+      }
+      return;
+    }
     if (e.target.closest('[data-gmail]')) {
       window.open(gmailLink(m, text), '_blank', 'noopener');
-      if (!m.answered_at && confirm('Письмо открыто в Gmail. Отметить сообщение как отвеченное?')) markAnswered(m.id, true);
+      if (!m.answered_at && confirm('Письмо открыто в Gmail. Отметить сообщение как отвеченное?')) markAnswered(m.id, text, true);
     }
     if (e.target.closest('[data-copy]')) {
       const full = `Кому: ${m.email}\nТема: ${SUBJECT}\n\n${text}`;
       try {
         await navigator.clipboard.writeText(full);
-        toast('Адрес, тема и текст скопированы — вставьте в любую почту');
+        toast('Адрес, тема и текст скопированы');
       } catch {
         toast(`Адрес: ${m.email}`);
       }
     }
-    if (e.target.closest('[data-answered]')) markAnswered(m.id);
+    const answeredBtn = e.target.closest('[data-answered]');
+    if (answeredBtn) {
+      answeredBtn.disabled = true;
+      await markAnswered(m.id, text);
+      answeredBtn.disabled = false;
+    }
     if (e.target.closest('[data-del-msg]') && confirm('Удалить сообщение?')) {
       try {
         await DB.admin.deleteMessage(card.dataset.id);

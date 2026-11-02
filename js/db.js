@@ -104,6 +104,10 @@
     if (findBanned(text)) throw new Error('Сообщение содержит недопустимые слова. Исправьте текст и попробуйте снова');
   }
 
+  /* закреплённые комментарии — сверху, остальные по времени */
+  const sortReplies = (rows) => [...rows].sort((a, b) =>
+    (Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))) || String(a.created_at).localeCompare(String(b.created_at)));
+
   /* публичная ссылка на файл аватарки в хранилище Supabase */
   function avatarUrl(path) {
     if (!path) return null;
@@ -169,6 +173,8 @@
           avatar_pending: Boolean(profile && profile.avatar_pending),
           banner_url: avatarUrl(profile && profile.banner_url),
           banner_pending: Boolean(profile && profile.banner_pending),
+          avatar_pending_url: avatarUrl(profile && profile.avatar_pending),
+          banner_pending_url: avatarUrl(profile && profile.banner_pending),
           muted_until: (profile && profile.muted_until) || null,
           mute_reason: (profile && profile.mute_reason) || null,
         };
@@ -235,7 +241,15 @@
         await run(sb.from('forum_posts').delete().eq('id', id));
       },
       async replies(postId) {
-        return run(sb.from('forum_replies').select('id, body, author_id, author_name, created_at').eq('post_id', postId).order('created_at'));
+        const query = (withPin) => sb.from('forum_replies')
+          .select(`id, body, author_id, author_name, created_at${withPin ? ', pinned' : ''}`).eq('post_id', postId).order('created_at');
+        let rows;
+        try {
+          rows = await run(query(true));
+        } catch {
+          rows = await run(query(false)); // schema-6 ещё не выполнен
+        }
+        return sortReplies(rows);
       },
       async reply(postId, body) {
         return run(sb.from('forum_replies').insert({ post_id: postId, body }).select().single());
@@ -306,6 +320,7 @@
           id: user.id, email: user.email, name: user.name, plan: user.plan, role: user.role || 'user',
           avatar_url: user.avatar_url || null, avatar_pending: Boolean(user.avatar_pending),
           banner_url: user.banner_url || null, banner_pending: Boolean(user.banner_pending),
+          avatar_pending_url: user.avatar_pending || null, banner_pending_url: user.banner_pending || null,
           muted_until: user.muted_until || null, mute_reason: user.mute_reason || null,
         } : null;
       },
@@ -371,7 +386,7 @@
         store.set('forum_replies', store.get('forum_replies', []).filter((r) => r.post_id !== id));
       },
       async replies(postId) {
-        return store.get('forum_replies', []).filter((r) => r.post_id === postId);
+        return sortReplies(store.get('forum_replies', []).filter((r) => r.post_id === postId));
       },
       async removeReply(id) {
         store.set('forum_replies', store.get('forum_replies', []).filter((r) => r.id !== id));
@@ -701,8 +716,32 @@
     async removeWord(word) {
       await run(sb.from('banned_words').delete().eq('word', word));
     },
-    async markAnswered(id) {
-      await run(sb.from('contact_messages').update({ answered_at: new Date().toISOString() }).eq('id', id));
+    async pinReply(id, pin) {
+      await run(sb.rpc('admin_pin_reply', { reply_id: id, pin }));
+    },
+    async markAnswered(id, reply) {
+      try {
+        await run(sb.rpc('admin_mark_answered', { message_id: id, reply: reply || null }));
+      } catch (error) {
+        if (!/admin_mark_answered|function|schema cache/i.test(error.message)) throw error;
+        // schema-6 ещё не выполнен — старый способ
+        const rows = await run(sb.from('contact_messages').update({ answered_at: new Date().toISOString() }).eq('id', id).select('id'));
+        if (!rows || !rows.length) throw new Error('Не удалось отметить: выполните в Supabase файл schema-6-messages.sql');
+      }
+    },
+    /* отправка ответа с общей почты через функцию Supabase admin-reply */
+    async sendReply(id, text) {
+      const { data, error } = await sb.functions.invoke('admin-reply', { body: { message_id: id, text } });
+      if (!error) return data;
+      let message = error.message;
+      let status = 0;
+      if (error.context && typeof error.context.json === 'function') {
+        status = error.context.status;
+        try { message = (await error.context.json()).error || message; } catch { /* не JSON */ }
+      }
+      const err = new Error(message);
+      err.noFunction = status === 404 || error.name === 'FunctionsFetchError' || error.name === 'FunctionsRelayError';
+      throw err;
     },
   });
 
@@ -744,12 +783,108 @@
     async removeWord(word) {
       store.set('banned_words', localWords().filter((w) => w !== word));
     },
-    async markAnswered(id) {
+    async pinReply(id, pin) {
+      store.set('forum_replies', store.get('forum_replies', []).map((r) => (r.id === id ? { ...r, pinned: pin } : r)));
+    },
+    async markAnswered(id, reply) {
       const all = store.get('messages', []);
-      if (all[Number(id)]) all[Number(id)].answered_at = new Date().toISOString();
+      if (all[Number(id)]) {
+        all[Number(id)].answered_at = new Date().toISOString();
+        if (reply) all[Number(id)].reply_text = reply;
+      }
       store.set('messages', all);
     },
+    async sendReply() {
+      const err = new Error('В демо-режиме письма не отправляются');
+      err.noFunction = true;
+      throw err;
+    },
   });
+
+  /* ===================== Личные сообщения ===================== */
+
+  const remoteDm = {
+    async conversations() {
+      const rows = await run(sb.rpc('dm_conversations'));
+      return rows.map((r) => ({ ...r, avatar_url: avatarUrl(r.avatar_url) }));
+    },
+    async thread(peerId) {
+      const { data } = await sb.auth.getSession();
+      const me = data && data.session && data.session.user.id;
+      if (!me) throw new Error('Сначала войдите в аккаунт');
+      const rows = await run(sb.from('direct_messages').select('id, sender_id, recipient_id, body, created_at, read_at')
+        .or(`and(sender_id.eq.${me},recipient_id.eq.${peerId}),and(sender_id.eq.${peerId},recipient_id.eq.${me})`)
+        .order('created_at', { ascending: false }).limit(300));
+      return rows.reverse().map((r) => ({ ...r, mine: r.sender_id === me }));
+    },
+    async send(peerId, body) {
+      return run(sb.from('direct_messages').insert({ recipient_id: peerId, body }).select().single());
+    },
+    async remove(id) {
+      await run(sb.from('direct_messages').delete().eq('id', id));
+    },
+    async markRead(peerId) {
+      await run(sb.rpc('dm_mark_read', { peer: peerId }));
+    },
+    async unread() {
+      try {
+        return (await run(sb.rpc('dm_unread_count'))) || 0;
+      } catch {
+        return 0;
+      }
+    },
+  };
+
+  const localDm = {
+    async me() {
+      const user = await local.auth.getUser();
+      if (!user) throw new Error('Сначала войдите в аккаунт');
+      return user;
+    },
+    async conversations() {
+      const me = await localDm.me();
+      const users = Object.values(store.get('users', {}));
+      const byPeer = {};
+      store.get('dms', []).filter((m) => m.sender_id === me.id || m.recipient_id === me.id).forEach((m) => {
+        const peer = m.sender_id === me.id ? m.recipient_id : m.sender_id;
+        const c = byPeer[peer] || (byPeer[peer] = { peer_id: peer, unread: 0 });
+        if (!c.last_at || m.created_at > c.last_at) Object.assign(c, { last_body: m.body, last_at: m.created_at, last_from_me: m.sender_id === me.id });
+        if (m.recipient_id === me.id && !m.read_at) c.unread += 1;
+      });
+      return Object.values(byPeer).map((c) => {
+        const u = users.find((x) => x.id === c.peer_id) || {};
+        return { ...c, name: u.name || 'Пользователь', avatar_url: u.avatar_url || null };
+      }).sort((a, b) => b.last_at.localeCompare(a.last_at));
+    },
+    async thread(peerId) {
+      const me = await localDm.me();
+      return store.get('dms', [])
+        .filter((m) => (m.sender_id === me.id && m.recipient_id === peerId) || (m.sender_id === peerId && m.recipient_id === me.id))
+        .map((m) => ({ ...m, mine: m.sender_id === me.id }));
+    },
+    async send(peerId, body) {
+      const me = await localDm.me();
+      if (peerId === me.id) throw new Error('Нельзя написать самому себе');
+      localGuard(me, body);
+      const all = store.get('dms', []);
+      const row = { id: newId(), sender_id: me.id, recipient_id: peerId, body, created_at: new Date().toISOString(), read_at: null };
+      all.push(row);
+      store.set('dms', all);
+      return row;
+    },
+    async remove(id) {
+      store.set('dms', store.get('dms', []).filter((m) => m.id !== id));
+    },
+    async markRead(peerId) {
+      const me = await localDm.me();
+      store.set('dms', store.get('dms', []).map((m) => (m.sender_id === peerId && m.recipient_id === me.id && !m.read_at ? { ...m, read_at: new Date().toISOString() } : m)));
+    },
+    async unread() {
+      const user = await local.auth.getUser();
+      if (!user) return 0;
+      return store.get('dms', []).filter((m) => m.recipient_id === user.id && !m.read_at).length;
+    },
+  };
 
   window.DB = {
     mode: useSupabase ? 'supabase' : 'demo',
@@ -761,6 +896,7 @@
     diary,
     admin: useSupabase ? remoteAdmin : localAdmin,
     profile: useSupabase ? remoteProfile : localProfile,
+    dm: useSupabase ? remoteDm : localDm,
     publicProfiles,
     checkText,
     async isCloud() { return Boolean(await remoteUserId()); },
