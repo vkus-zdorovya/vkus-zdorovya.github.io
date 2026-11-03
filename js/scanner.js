@@ -122,6 +122,15 @@
 
   async function notFound(code) {
     const user = await UI.userReady;
+    if (!BARCODE.valid(code)) {
+      productEl.innerHTML = `
+        <div class="card">
+          <h3>Похоже, в штрихкоде ошибка</h3>
+          <p class="muted">У кода ${esc(code)} не сходится контрольная цифра — последняя цифра штрихкода, которая проверяет остальные.
+            Сверьте цифры под полосками на упаковке и введите их ещё раз. Штрихкоды бывают из 8, 12 или 13 цифр.</p>
+        </div>`;
+      return;
+    }
     productEl.innerHTML = `
       <div class="card">
         <h3>Продукт не найден</h3>
@@ -152,10 +161,18 @@
         <div class="field" style="margin-top:14px"><label for="ap-ingr">Состав</label>
           <textarea class="textarea" id="ap-ingr" maxlength="3000" style="min-height:80px" placeholder="Можно не заполнять"></textarea></div>
         <label class="check" style="margin-top:10px"><input type="checkbox" id="ap-drink"> Это напиток</label>
-        <div class="inline-form" style="margin-top:14px;align-items:center">
-          <label class="btn btn-ghost" for="ap-photo" style="cursor:pointer">📷 Фото упаковки</label>
-          <input type="file" id="ap-photo" accept="image/jpeg,image/png,image/webp" class="sr-only">
-          <span class="small muted" id="ap-photo-name">необязательно</span>
+        <p class="small muted" style="margin:16px 0 6px">Два фото — по ним администратор проверит, что товар настоящий:</p>
+        <div class="photo-picks">
+          <label class="photo-pick" for="ap-photo-front">
+            <input type="file" id="ap-photo-front" accept="image/jpeg,image/png,image/webp" class="sr-only">
+            <span class="photo-pick-img" id="ap-photo-front-img">📷</span>
+            <span><b>Лицевая сторона *</b><br><span class="small muted">название и бренд</span></span>
+          </label>
+          <label class="photo-pick" for="ap-photo-label">
+            <input type="file" id="ap-photo-label" accept="image/jpeg,image/png,image/webp" class="sr-only">
+            <span class="photo-pick-img" id="ap-photo-label-img">🧾</span>
+            <span><b>Состав и штрихкод *</b><br><span class="small muted">таблица КБЖУ и цифры под штрихкодом</span></span>
+          </label>
         </div>
         <p class="form-error" role="alert"></p>
         <button class="btn btn-primary" type="submit">Отправить на проверку</button>
@@ -180,20 +197,33 @@
     });
   }
 
+  const kcalFromMacros = (x) => 4 * (x.protein || 0) + 9 * (x.fat || 0) + 4 * (x.carbs || 0);
+  /* допускаем расхождение до 20 % (не меньше 25 ккал): клетчатка, сахарозаменители и округление на упаковке */
+  const kcalMismatch = (kcal, est) => Math.abs(kcal - est) > Math.max(25, est * 0.2);
+
   function bindAddForm(code) {
     const form = document.getElementById('add-product');
     const $ = (id) => form.querySelector('#' + id);
-    let photo = null;
-    $('ap-photo').addEventListener('change', async () => {
-      const file = $('ap-photo').files[0];
-      if (!file) return;
-      try {
-        photo = await shrink(file);
-        $('ap-photo-name').textContent = '✓ ' + file.name;
-      } catch (err) {
-        photo = null;
-        toast(err.message, 'error');
-      }
+    const photos = { front: null, label: null };
+    form.addEventListener('input', (e) => {
+      if (/^ap-(kcal|p|f|c)$/.test(e.target.id)) delete form.dataset.confirmed;
+    });
+    ['front', 'label'].forEach((kind) => {
+      const input = $(`ap-photo-${kind}`);
+      input.addEventListener('change', async () => {
+        const file = input.files[0];
+        if (!file) return;
+        try {
+          // таблицу состава уменьшаем меньше — мелкий текст должен читаться
+          photos[kind] = await shrink(file, kind === 'label' ? 1400 : 800);
+          $(`ap-photo-${kind}-img`).innerHTML = `<img src="${URL.createObjectURL(photos[kind])}" alt="">`;
+          input.closest('.photo-pick').classList.add('done');
+          form.querySelector('.form-error').textContent = '';
+        } catch (err) {
+          photos[kind] = null;
+          toast(err.message, 'error');
+        }
+      });
     });
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -210,10 +240,19 @@
         is_drink: $('ap-drink').checked,
       };
       if (fields.name.length < 2) { err.textContent = 'Укажите название товара'; return; }
+      if (!photos.front || !photos.label) { err.textContent = 'Приложите оба фото: лицевую сторону и сторону с составом и штрихкодом'; return; }
       const bad = [['kcal', 950], ['protein', 100], ['fat', 100], ['carbs', 100], ['sugars', 100], ['salt', 100]]
         .find(([k, max]) => (k === 'kcal' || k === 'protein' || k === 'fat' || k === 'carbs' || fields[k] != null) && !(fields[k] >= 0 && fields[k] <= max));
       if (bad) { err.textContent = 'Проверьте КБЖУ: калории от 0 до 950, белки, жиры и углеводы от 0 до 100 г'; return; }
       if (fields.protein + fields.fat + fields.carbs > 100) { err.textContent = 'Белков, жиров и углеводов вместе не может быть больше 100 г на 100 г'; return; }
+      // калории должны примерно сходиться с БЖУ: 4 ккал на грамм белка и углеводов, 9 — на грамм жира
+      const est = kcalFromMacros(fields);
+      if (kcalMismatch(fields.kcal, est) && !form.dataset.confirmed) {
+        err.innerHTML = `⚠️ Калории не сходятся с БЖУ: по белкам, жирам и углеводам выходит около <b>${Math.round(est)} ккал</b>, а указано <b>${fields.kcal}</b>.
+          Проверьте цифры на упаковке. Если всё верно, нажмите «Отправить» ещё раз.`;
+        form.dataset.confirmed = '1';
+        return;
+      }
       if (!(await DB.checkText([fields.name, fields.brand, fields.ingredients].filter(Boolean).join(' ')))) {
         err.textContent = 'Текст содержит недопустимые слова';
         return;
@@ -223,7 +262,7 @@
       btn.disabled = true;
       btn.textContent = '⏳ Отправляем…';
       try {
-        await DB.products.submit(fields, photo);
+        await DB.products.submit(fields, photos);
         productEl.innerHTML = `<div class="card"><h3>✅ Спасибо!</h3><p class="muted">Товар «${esc(fields.name)}» отправлен на проверку. Когда администратор его одобрит, он будет находиться по штрихкоду ${esc(code)} у всех.</p></div>`;
       } catch (error) {
         err.textContent = /product_requests|schema cache/i.test(error.message)
@@ -335,7 +374,7 @@
           <div>
             <h2 style="font-size:1.4rem;margin-bottom:4px">${esc(productName(p))}</h2>
             <div class="muted">${esc([p.brands, p.quantity].filter(Boolean).join(' · '))}</div>
-            <div class="small muted">Штрихкод ${esc(code)}${source === 'user' ? ' · добавлен участниками «Вкус здоровья»' : ''}</div>
+            <div class="small muted">Штрихкод ${esc(code)}${(() => { const c = BARCODE.country(code); return c ? ` · ${c.flag} код выдан: ${esc(c.name)}` : ''; })()}${source === 'user' ? ' · добавлен участниками «Вкус здоровья»' : ''}</div>
           </div>
         </div>
 

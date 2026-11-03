@@ -924,15 +924,17 @@
       // 3) напрямую из Open Food Facts
       return { product: await offLookup(code), source: 'off' };
     },
-    async submit(fields, photo) {
+    async submit(fields, photos) {
       const { data } = await sb.auth.getSession();
       if (!data || !data.session) throw new Error('Сначала войдите в аккаунт');
-      let photoPath = null;
-      if (photo) {
-        photoPath = `${data.session.user.id}/product-${fields.barcode}-${newId()}.jpg`;
-        await run(sb.storage.from('avatars').upload(photoPath, photo, { contentType: photo.type || 'image/jpeg', upsert: false }));
-      }
-      await run(sb.from('product_requests').insert({ ...fields, photo_path: photoPath }));
+      const upload = async (blob, kind) => {
+        const path = `${data.session.user.id}/product-${fields.barcode}-${kind}-${newId()}.jpg`;
+        await run(sb.storage.from('avatars').upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: false }));
+        return path;
+      };
+      const photoPath = await upload(photos.front, 'front');
+      const labelPath = await upload(photos.label, 'label');
+      await run(sb.from('product_requests').insert({ ...fields, photo_path: photoPath, photo_label_path: labelPath }));
     },
   };
 
@@ -942,7 +944,7 @@
       if (own) return { product: own, source: 'user' };
       return { product: await offLookup(code), source: 'off' };
     },
-    async submit(fields, photo) {
+    async submit(fields, photos) {
       const user = await local.auth.getUser();
       if (!user) throw new Error('Сначала войдите в аккаунт');
       localGuard(user, [fields.name, fields.brand, fields.ingredients].join(' '));
@@ -950,12 +952,13 @@
       if (all.some((r) => r.barcode === fields.barcode && r.user_id === user.id && r.status === 'pending')) {
         throw new Error('Вы уже отправили этот товар — он ждёт проверки');
       }
-      const photoUrl = photo ? await new Promise((resolve) => {
+      const toUrl = (blob) => new Promise((resolve) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result);
-        reader.readAsDataURL(photo);
-      }) : null;
-      all.push({ ...fields, id: newId(), user_id: user.id, author_name: user.name, author_email: user.email, photo_url: photoUrl, status: 'pending', created_at: new Date().toISOString() });
+        reader.readAsDataURL(blob);
+      });
+      all.push({ ...fields, id: newId(), user_id: user.id, author_name: user.name, author_email: user.email,
+        photo_url: await toUrl(photos.front), photo_label_url: await toUrl(photos.label), status: 'pending', created_at: new Date().toISOString() });
       store.set('product_requests', all);
     },
   };
@@ -975,7 +978,7 @@
   Object.assign(remoteAdmin, {
     async productRequests() {
       const rows = await run(sb.rpc('admin_product_requests'));
-      return rows.map((r) => ({ ...r, photo_url: avatarUrl(r.photo_path) }));
+      return rows.map((r) => ({ ...r, photo_url: avatarUrl(r.photo_path), photo_label_url: avatarUrl(r.photo_label_path) }));
     },
     async reviewProduct(id, approve) {
       await run(sb.rpc('admin_review_product', { request_id: id, approve }));

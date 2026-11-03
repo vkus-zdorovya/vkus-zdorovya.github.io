@@ -17,6 +17,7 @@
   <script defer src="js/db.js"></script>
   <script defer src="js/data.js"></script>
   <script defer src="js/main.js"></script>
+  <script defer src="js/barcode.js"></script>
   <script defer src="js/admin.js"></script>
 </head>
 <body>
@@ -85,7 +86,15 @@
         </div>
 
         <div data-pane="products" class="hidden">
-          <p class="muted">Товары, которые участники добавили через сканер. После одобрения их находят по штрихкоду все. Сверьте КБЖУ с фото упаковки.</p>
+          <div class="card check-howto">
+            <b>Как проверить товар</b>
+            <ol class="small">
+              <li>На фото состава цифры под штрихкодом совпадают с кодом заявки.</li>
+              <li>КБЖУ в заявке совпадает с таблицей на фото.</li>
+              <li>По кнопке «🔎 Яндекс» товар с этим кодом находится в магазинах или каталогах.</li>
+              <li>Страна кода не противоречит товару (у российских брендов обычно 460–469).</li>
+            </ol>
+          </div>
           <div class="posts" id="product-requests"></div>
         </div>
 

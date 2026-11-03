@@ -42,6 +42,9 @@ create table if not exists public.product_requests (
   status     text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
   created_at timestamptz not null default now()
 );
+-- два фото: лицевая сторона и сторона с таблицей КБЖУ и штрихкодом
+alter table public.product_requests add column if not exists photo_label_path text;
+
 create index if not exists product_requests_status_idx on public.product_requests (status, created_at);
 
 alter table public.product_requests enable row level security;
@@ -58,7 +61,28 @@ revoke update, delete on public.product_requests from anon, authenticated;
 revoke all on public.product_requests from anon;
 grant select, insert on public.product_requests to authenticated;
 
--- проверки при отправке: мут, запрещённые слова, не больше 10 заявок в час, без повторов
+-- контрольная цифра штрихкода (EAN-8, UPC-A, EAN-13, GTIN-14): выдуманный номер почти всегда её не проходит
+create or replace function public.gtin_valid(code text)
+returns boolean
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  total int := 0;
+  n int;
+begin
+  if code !~ '^[0-9]+$' or char_length(code) not in (8, 12, 13, 14) then return false; end if;
+  n := char_length(code);
+  -- справа налево без последней цифры: веса 3, 1, 3, 1…
+  for i in 1 .. n - 1 loop
+    total := total + substr(code, n - i, 1)::int * case when i % 2 = 1 then 3 else 1 end;
+  end loop;
+  return (10 - total % 10) % 10 = substr(code, n, 1)::int;
+end;
+$$;
+
+-- проверки при отправке: штрихкод, фото, мут, запрещённые слова, не больше 10 заявок в час, без повторов
 create or replace function public.product_request_check()
 returns trigger
 language plpgsql
@@ -82,7 +106,15 @@ begin
     raise exception 'Сообщение содержит недопустимые слова. Исправьте текст и попробуйте снова';
   end if;
 
-  if new.photo_path is not null and split_part(new.photo_path, '/', 1) <> new.user_id::text then
+  if not public.gtin_valid(new.barcode) then
+    raise exception 'Штрихкод введён с ошибкой: не сходится контрольная цифра';
+  end if;
+
+  if new.photo_path is null or new.photo_label_path is null then
+    raise exception 'Приложите два фото: лицевую сторону и сторону с составом и штрихкодом';
+  end if;
+  if split_part(new.photo_path, '/', 1) <> new.user_id::text
+     or split_part(new.photo_label_path, '/', 1) <> new.user_id::text then
     raise exception 'Неверный путь к фото';
   end if;
 
@@ -108,7 +140,7 @@ create function public.admin_product_requests()
 returns table (
   id bigint, barcode text, name text, brand text, quantity text,
   kcal numeric, protein numeric, fat numeric, carbs numeric, sugars numeric, salt numeric,
-  ingredients text, is_drink boolean, photo_path text, created_at timestamptz,
+  ingredients text, is_drink boolean, photo_path text, photo_label_path text, created_at timestamptz,
   author_name text, author_email text, existing boolean
 )
 language plpgsql
@@ -119,7 +151,7 @@ begin
   if not public.is_admin() then raise exception 'Нет доступа'; end if;
   return query
     select r.id, r.barcode, r.name, r.brand, r.quantity, r.kcal, r.protein, r.fat, r.carbs, r.sugars, r.salt,
-           r.ingredients, r.is_drink, r.photo_path, r.created_at,
+           r.ingredients, r.is_drink, r.photo_path, r.photo_label_path, r.created_at,
            p.name, u.email::text, exists (select 1 from public.products x where x.barcode = r.barcode)
       from public.product_requests r
       left join public.profiles p on p.id = r.user_id

@@ -254,20 +254,35 @@
       box.innerHTML = productRequests.length ? productRequests.map((r, i) => `
         <article class="card post product-request" data-i="${i}">
           <div class="product-request-body">
-            ${r.photo_url ? `<a href="${esc(r.photo_url)}" target="_blank" rel="noopener"><img src="${esc(r.photo_url)}" alt="Фото упаковки"></a>` : '<div class="ph" aria-hidden="true">📦</div>'}
+            <div class="product-request-photos">
+              ${[[r.photo_url, 'Лицевая сторона'], [r.photo_label_url, 'Состав и штрихкод']].map(([url, label]) => url
+                ? `<a href="${esc(url)}" target="_blank" rel="noopener" title="${label} — открыть крупно"><img src="${esc(url)}" alt="${label}"><span>${label}</span></a>`
+                : `<div class="ph" title="${label}">📦<span>нет фото</span></div>`).join('')}
+            </div>
             <div style="min-width:0">
               <h3>${esc(r.name)}</h3>
               <div class="muted">${esc([r.brand, r.quantity].filter(Boolean).join(' · ') || 'Без производителя')}${r.is_drink ? ' · напиток' : ''}</div>
-              <div class="small muted">Штрихкод ${esc(r.barcode)}${r.existing ? ' · <b>уже есть в базе — заменит карточку</b>' : ''}</div>
+              <div class="small muted">Штрихкод <b>${esc(r.barcode)}</b>${r.existing ? ' · <b>уже есть в базе — заменит карточку</b>' : ''}</div>
+              <div class="tags" style="margin-top:6px">
+                ${BARCODE.valid(r.barcode) ? '<span class="tag">✓ контрольная цифра верна</span>' : '<span class="tag tag-bad">✕ штрихкод с ошибкой</span>'}
+                ${(() => { const c = BARCODE.country(r.barcode); return c ? `<span class="tag">${c.flag} код выдан: ${esc(c.name)}</span>` : ''; })()}
+              </div>
               <div class="tags" style="margin-top:8px">
                 <span class="tag">🔥 ${n(r.kcal)} ккал</span><span class="tag">Б ${n(r.protein)}</span><span class="tag">Ж ${n(r.fat)}</span><span class="tag">У ${n(r.carbs)}</span>
                 ${r.sugars != null ? `<span class="tag">сахар ${n(r.sugars)}</span>` : ''}${r.salt != null ? `<span class="tag">соль ${n(r.salt)}</span>` : ''}
               </div>
+              ${(() => {
+                const est = 4 * Number(r.protein) + 9 * Number(r.fat) + 4 * Number(r.carbs);
+                return Math.abs(Number(r.kcal) - est) > Math.max(25, est * 0.2)
+                  ? `<p class="small kcal-warn">⚠️ Калории не сходятся с БЖУ: по расчёту ≈ ${Math.round(est)} ккал. Сверьте с фото.</p>` : '';
+              })()}
               ${r.ingredients ? `<p class="small" style="margin:8px 0 0">${esc(r.ingredients)}</p>` : ''}
               <div class="small muted" style="margin-top:8px">Добавил(а): ${esc(r.author_name || '—')} (${esc(r.author_email || '')}), ${fmt(r.created_at)}</div>
             </div>
           </div>
           <div class="post-foot">
+            <a class="btn btn-ghost btn-sm" href="https://yandex.ru/search/?text=${encodeURIComponent(r.barcode)}" target="_blank" rel="noopener">🔎 Яндекс</a>
+            <a class="btn btn-ghost btn-sm" href="https://www.google.com/search?q=${encodeURIComponent('"' + r.barcode + '"')}" target="_blank" rel="noopener">🔎 Google</a>
             <button class="btn btn-primary btn-sm" type="button" data-approve-product>✓ Одобрить</button>
             <button class="btn btn-danger btn-sm" type="button" data-reject-product>✕ Отклонить</button>
           </div>
