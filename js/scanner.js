@@ -2,9 +2,7 @@
 (function () {
   const { esc, toast } = window.UI;
   const ZXING_URL = 'js/vendor/zxing.min.js';
-  // на Netlify запросы идут через свой домен (правило /off/* в _redirects), на других хостингах — напрямую
-  const API = (window.APP_CONFIG.useProxy ? location.origin + '/off' : 'https://world.openfoodfacts.org') + '/api/v2/product/';
-  const FIELDS = 'product_name,product_name_ru,brands,image_front_small_url,nutriments,nutriscore_grade,nova_group,additives_tags,ingredients_text_ru,ingredients_text,categories_tags,quantity';
+  // товары ищутся через Supabase (DB.products): наша база + Open Food Facts со стороны сервера — работает без VPN
 
   const video = document.getElementById('video');
   const frame = document.getElementById('frame');
@@ -108,29 +106,133 @@
       return;
     }
     productEl.innerHTML = '<div class="card center muted">Ищем продукт…</div>';
-    let data;
+    let found;
     try {
-      const res = await fetch(`${API}${code}.json?fields=${FIELDS}`);
-      if (res.status === 404) return notFound(code);
-      if (!res.ok) throw new Error(res.statusText);
-      data = await res.json();
+      found = await DB.products.lookup(code);
     } catch {
       productEl.innerHTML = '<div class="card form-error">Не удалось связаться с базой продуктов. Проверьте интернет и попробуйте ещё раз.</div>';
       return;
     }
-    if (data.status !== 1 || !data.product) return notFound(code);
-    renderProduct(code, data.product);
-    remember(code, productName(data.product));
+    if (!found || !found.product) return notFound(code);
+    renderProduct(code, found.product, found.source);
+    remember(code, productName(found.product));
   }
 
-  function notFound(code) {
+  /* ===================== Добавление товара участником ===================== */
+
+  async function notFound(code) {
+    const user = await UI.userReady;
     productEl.innerHTML = `
       <div class="card">
         <h3>Продукт не найден</h3>
-        <p class="muted">Штрихкода ${esc(code)} пока нет в открытой базе. Вы можете добавить его на сайте
-          <a href="https://ru.openfoodfacts.org/cgi/product.pl?type=add&code=${encodeURIComponent(code)}" target="_blank" rel="noopener">Open Food Facts</a>
-          или записать продукт в <a href="diary.html">дневник</a> вручную, переписав КБЖУ с упаковки.</p>
+        <p class="muted">Штрихкода ${esc(code)} пока нет ни в нашей базе, ни в открытой базе Open Food Facts.
+          ${user ? 'Добавьте его — после проверки администратором товар будут находить все.' : '<a href="login.html">Войдите</a>, чтобы добавить его в базу, или запишите продукт в <a href="diary.html">дневник</a> вручную.'}</p>
+        ${user ? addForm(code) : ''}
       </div>`;
+    if (user) bindAddForm(code);
+  }
+
+  function addForm(code) {
+    const num = (id, label, req, max = 100) => `<div class="field"><label for="${id}">${label}${req ? ' *' : ''}</label>
+      <input class="input" id="${id}" type="number" inputmode="decimal" min="0" max="${max}" step="0.1"${req ? ' required' : ''}></div>`;
+    return `
+      <form class="add-product" id="add-product" novalidate>
+        <h3>Добавить товар</h3>
+        <div class="form-grid">
+          <div class="field" style="grid-column:1/-1"><label for="ap-name">Название *</label>
+            <input class="input" id="ap-name" maxlength="120" required placeholder="Например: Кефир 1%"></div>
+          <div class="field"><label for="ap-brand">Производитель</label><input class="input" id="ap-brand" maxlength="80" placeholder="Простоквашино"></div>
+          <div class="field"><label for="ap-qty">Объём / вес</label><input class="input" id="ap-qty" maxlength="40" placeholder="900 мл"></div>
+        </div>
+        <p class="small muted" style="margin:14px 0 6px">Пищевая ценность на 100 г (или 100 мл) — как на упаковке:</p>
+        <div class="form-grid nutri-inputs">
+          ${num('ap-kcal', 'Ккал', true, 950)}${num('ap-p', 'Белки, г', true)}${num('ap-f', 'Жиры, г', true)}${num('ap-c', 'Углеводы, г', true)}
+          ${num('ap-sugar', 'В т. ч. сахар, г')}${num('ap-salt', 'Соль, г')}
+        </div>
+        <div class="field" style="margin-top:14px"><label for="ap-ingr">Состав</label>
+          <textarea class="textarea" id="ap-ingr" maxlength="3000" style="min-height:80px" placeholder="Можно не заполнять"></textarea></div>
+        <label class="check" style="margin-top:10px"><input type="checkbox" id="ap-drink"> Это напиток</label>
+        <div class="inline-form" style="margin-top:14px;align-items:center">
+          <label class="btn btn-ghost" for="ap-photo" style="cursor:pointer">📷 Фото упаковки</label>
+          <input type="file" id="ap-photo" accept="image/jpeg,image/png,image/webp" class="sr-only">
+          <span class="small muted" id="ap-photo-name">необязательно</span>
+        </div>
+        <p class="form-error" role="alert"></p>
+        <button class="btn btn-primary" type="submit">Отправить на проверку</button>
+      </form>`;
+  }
+
+  /* фото упаковки уменьшаем до 800 px — так оно весит около 100 КБ */
+  function shrink(file, max = 800) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, max / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * k);
+        canvas.height = Math.round(img.height * k);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        URL.revokeObjectURL(img.src);
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Не удалось обработать фото'))), 'image/jpeg', 0.85);
+      };
+      img.onerror = () => reject(new Error('Не удалось открыть фото'));
+      img.src = URL.createObjectURL(file);
+    });
+  }
+
+  function bindAddForm(code) {
+    const form = document.getElementById('add-product');
+    const $ = (id) => form.querySelector('#' + id);
+    let photo = null;
+    $('ap-photo').addEventListener('change', async () => {
+      const file = $('ap-photo').files[0];
+      if (!file) return;
+      try {
+        photo = await shrink(file);
+        $('ap-photo-name').textContent = '✓ ' + file.name;
+      } catch (err) {
+        photo = null;
+        toast(err.message, 'error');
+      }
+    });
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const err = form.querySelector('.form-error');
+      const val = (id) => ($(id).value.trim() === '' ? null : Number($(id).value.replace(',', '.')));
+      const fields = {
+        barcode: code,
+        name: $('ap-name').value.trim(),
+        brand: $('ap-brand').value.trim() || null,
+        quantity: $('ap-qty').value.trim() || null,
+        kcal: val('ap-kcal'), protein: val('ap-p'), fat: val('ap-f'), carbs: val('ap-c'),
+        sugars: val('ap-sugar'), salt: val('ap-salt'),
+        ingredients: $('ap-ingr').value.trim() || null,
+        is_drink: $('ap-drink').checked,
+      };
+      if (fields.name.length < 2) { err.textContent = 'Укажите название товара'; return; }
+      const bad = [['kcal', 950], ['protein', 100], ['fat', 100], ['carbs', 100], ['sugars', 100], ['salt', 100]]
+        .find(([k, max]) => (k === 'kcal' || k === 'protein' || k === 'fat' || k === 'carbs' || fields[k] != null) && !(fields[k] >= 0 && fields[k] <= max));
+      if (bad) { err.textContent = 'Проверьте КБЖУ: калории от 0 до 950, белки, жиры и углеводы от 0 до 100 г'; return; }
+      if (fields.protein + fields.fat + fields.carbs > 100) { err.textContent = 'Белков, жиров и углеводов вместе не может быть больше 100 г на 100 г'; return; }
+      if (!(await DB.checkText([fields.name, fields.brand, fields.ingredients].filter(Boolean).join(' ')))) {
+        err.textContent = 'Текст содержит недопустимые слова';
+        return;
+      }
+      err.textContent = '';
+      const btn = form.querySelector('button[type="submit"]');
+      btn.disabled = true;
+      btn.textContent = '⏳ Отправляем…';
+      try {
+        await DB.products.submit(fields, photo);
+        productEl.innerHTML = `<div class="card"><h3>✅ Спасибо!</h3><p class="muted">Товар «${esc(fields.name)}» отправлен на проверку. Когда администратор его одобрит, он будет находиться по штрихкоду ${esc(code)} у всех.</p></div>`;
+      } catch (error) {
+        err.textContent = /product_requests|schema cache/i.test(error.message)
+          ? 'Добавление товаров ещё не подключено: выполните в Supabase файл schema-8-products.sql'
+          : error.message;
+        btn.disabled = false;
+        btn.textContent = 'Отправить на проверку';
+      }
+    });
   }
 
   const productName = (p) => p.product_name_ru || p.product_name || 'Без названия';
@@ -178,7 +280,7 @@
     [/instant-noodles|noodles/, 'noodles'],
   ];
 
-  function renderProduct(code, p) {
+  function renderProduct(code, p, source) {
     const n = p.nutriments || {};
     const num = (key) => (n[key + '_100g'] != null && n[key + '_100g'] !== '' ? Number(n[key + '_100g']) : null);
     const cats = (p.categories_tags || []).join(' ');
@@ -229,11 +331,11 @@
     productEl.innerHTML = `
       <div class="card">
         <div class="product-head">
-          ${p.image_front_small_url ? `<img src="${esc(p.image_front_small_url)}" alt="" loading="lazy">` : '<div class="ph" aria-hidden="true">🛒</div>'}
+          ${p.image_front_small_url ? `<img src="${esc(p.image_front_small_url)}" alt="" loading="lazy" onerror="this.outerHTML='<div class=&quot;ph&quot; aria-hidden=&quot;true&quot;>🛒</div>'">` : '<div class="ph" aria-hidden="true">🛒</div>'}
           <div>
             <h2 style="font-size:1.4rem;margin-bottom:4px">${esc(productName(p))}</h2>
             <div class="muted">${esc([p.brands, p.quantity].filter(Boolean).join(' · '))}</div>
-            <div class="small muted">Штрихкод ${esc(code)}</div>
+            <div class="small muted">Штрихкод ${esc(code)}${source === 'user' ? ' · добавлен участниками «Вкус здоровья»' : ''}</div>
           </div>
         </div>
 

@@ -45,7 +45,7 @@
 
   /* ---------- вкладки ---------- */
 
-  const loaders = { overview: loadStats, users: loadUsers, avatars: loadAvatars, forum: loadForum, words: loadWords, messages: loadMessages };
+  const loaders = { overview: loadStats, users: loadUsers, avatars: loadAvatars, products: loadProducts, forum: loadForum, words: loadWords, messages: loadMessages };
   $('admin-tabs').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-tab]');
     if (!btn) return;
@@ -230,6 +230,61 @@
       await DB.admin.reviewMedia(r.id, r.kind, Boolean(approve));
       toast(approve ? 'Одобрено' : 'Отклонено');
       loadAvatars();
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  });
+
+  /* ---------- товары от участников ---------- */
+
+  let productRequests = [];
+  function loadProducts() {
+    const box = $('product-requests');
+    return guard(box, async () => {
+      try {
+        productRequests = await DB.admin.productRequests();
+      } catch (error) {
+        if (/admin_product_requests|schema cache|function/i.test(error.message)) {
+          throw new Error('Выполните в Supabase файл schema-8-products.sql, чтобы включить добавление товаров');
+        }
+        throw error;
+      }
+      $('products-count').textContent = productRequests.length ? `(${productRequests.length})` : '';
+      const n = (v) => (v == null ? '—' : Number(v).toLocaleString('ru-RU'));
+      box.innerHTML = productRequests.length ? productRequests.map((r, i) => `
+        <article class="card post product-request" data-i="${i}">
+          <div class="product-request-body">
+            ${r.photo_url ? `<a href="${esc(r.photo_url)}" target="_blank" rel="noopener"><img src="${esc(r.photo_url)}" alt="Фото упаковки"></a>` : '<div class="ph" aria-hidden="true">📦</div>'}
+            <div style="min-width:0">
+              <h3>${esc(r.name)}</h3>
+              <div class="muted">${esc([r.brand, r.quantity].filter(Boolean).join(' · ') || 'Без производителя')}${r.is_drink ? ' · напиток' : ''}</div>
+              <div class="small muted">Штрихкод ${esc(r.barcode)}${r.existing ? ' · <b>уже есть в базе — заменит карточку</b>' : ''}</div>
+              <div class="tags" style="margin-top:8px">
+                <span class="tag">🔥 ${n(r.kcal)} ккал</span><span class="tag">Б ${n(r.protein)}</span><span class="tag">Ж ${n(r.fat)}</span><span class="tag">У ${n(r.carbs)}</span>
+                ${r.sugars != null ? `<span class="tag">сахар ${n(r.sugars)}</span>` : ''}${r.salt != null ? `<span class="tag">соль ${n(r.salt)}</span>` : ''}
+              </div>
+              ${r.ingredients ? `<p class="small" style="margin:8px 0 0">${esc(r.ingredients)}</p>` : ''}
+              <div class="small muted" style="margin-top:8px">Добавил(а): ${esc(r.author_name || '—')} (${esc(r.author_email || '')}), ${fmt(r.created_at)}</div>
+            </div>
+          </div>
+          <div class="post-foot">
+            <button class="btn btn-primary btn-sm" type="button" data-approve-product>✓ Одобрить</button>
+            <button class="btn btn-danger btn-sm" type="button" data-reject-product>✕ Отклонить</button>
+          </div>
+        </article>`).join('') : '<div class="card muted center">Новых товаров нет.</div>';
+    });
+  }
+
+  $('product-requests').addEventListener('click', async (e) => {
+    const card = e.target.closest('.product-request');
+    const approve = e.target.closest('[data-approve-product]');
+    const reject = e.target.closest('[data-reject-product]');
+    if (!card || (!approve && !reject)) return;
+    const r = productRequests[Number(card.dataset.i)];
+    try {
+      await DB.admin.reviewProduct(r.id, Boolean(approve));
+      toast(approve ? `«${r.name}» добавлен в базу` : 'Заявка отклонена');
+      loadProducts();
     } catch (error) {
       toast(error.message, 'error');
     }

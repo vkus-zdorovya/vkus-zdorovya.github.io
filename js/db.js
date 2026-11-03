@@ -886,6 +886,121 @@
     },
   };
 
+
+  /* ===================== База продуктов для сканера ===================== */
+
+  const OFF_FIELDS = 'product_name,product_name_ru,brands,image_front_small_url,nutriments,nutriscore_grade,nova_group,additives_tags,ingredients_text_ru,ingredients_text,categories_tags,quantity';
+  const offBase = () => (window.APP_CONFIG && APP_CONFIG.useProxy ? location.origin + '/off' : 'https://world.openfoodfacts.org');
+
+  /* запасной путь: прямой запрос к Open Food Facts (без VPN на мобильном может не работать) */
+  async function offLookup(code) {
+    const res = await fetch(`${offBase()}/api/v2/product/${code}.json?fields=${OFF_FIELDS}`);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(res.statusText);
+    const body = await res.json();
+    return body.status === 1 && body.product ? body.product : null;
+  }
+
+  /* фото, которое приложил участник, лежит в нашем хранилище */
+  function withImage(product) {
+    if (product && product.image_path && !product.image_front_small_url) {
+      return { ...product, image_front_small_url: avatarUrl(product.image_path) };
+    }
+    return product;
+  }
+
+  const remoteProducts = {
+    async lookup(code) {
+      // 1) через функцию Supabase: наша база + Open Food Facts со стороны сервера
+      try {
+        const { data, error } = await sb.functions.invoke('product', { body: { code } });
+        if (!error && data && !data.error) return { product: withImage(data.product), source: data.source || null };
+      } catch { /* функция не подключена — пробуем дальше */ }
+      // 2) напрямую из нашей таблицы
+      try {
+        const row = await run(sb.from('products').select('data, source').eq('barcode', code).maybeSingle());
+        if (row) return { product: withImage(row.data), source: row.source };
+      } catch { /* таблицы ещё нет */ }
+      // 3) напрямую из Open Food Facts
+      return { product: await offLookup(code), source: 'off' };
+    },
+    async submit(fields, photo) {
+      const { data } = await sb.auth.getSession();
+      if (!data || !data.session) throw new Error('Сначала войдите в аккаунт');
+      let photoPath = null;
+      if (photo) {
+        photoPath = `${data.session.user.id}/product-${fields.barcode}-${newId()}.jpg`;
+        await run(sb.storage.from('avatars').upload(photoPath, photo, { contentType: photo.type || 'image/jpeg', upsert: false }));
+      }
+      await run(sb.from('product_requests').insert({ ...fields, photo_path: photoPath }));
+    },
+  };
+
+  const localProducts = {
+    async lookup(code) {
+      const own = store.get('products', {})[code];
+      if (own) return { product: own, source: 'user' };
+      return { product: await offLookup(code), source: 'off' };
+    },
+    async submit(fields, photo) {
+      const user = await local.auth.getUser();
+      if (!user) throw new Error('Сначала войдите в аккаунт');
+      localGuard(user, [fields.name, fields.brand, fields.ingredients].join(' '));
+      const all = store.get('product_requests', []);
+      if (all.some((r) => r.barcode === fields.barcode && r.user_id === user.id && r.status === 'pending')) {
+        throw new Error('Вы уже отправили этот товар — он ждёт проверки');
+      }
+      const photoUrl = photo ? await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(photo);
+      }) : null;
+      all.push({ ...fields, id: newId(), user_id: user.id, author_name: user.name, author_email: user.email, photo_url: photoUrl, status: 'pending', created_at: new Date().toISOString() });
+      store.set('product_requests', all);
+    },
+  };
+
+  /* карточка товара в формате Open Food Facts — как её показывает сканер */
+  function productCard(r, image) {
+    const nutriments = { 'energy-kcal_100g': r.kcal, proteins_100g: r.protein, fat_100g: r.fat, carbohydrates_100g: r.carbs };
+    if (r.sugars != null) nutriments.sugars_100g = r.sugars;
+    if (r.salt != null) nutriments.salt_100g = r.salt;
+    return {
+      product_name: r.name, brands: r.brand || undefined, quantity: r.quantity || undefined,
+      ingredients_text_ru: r.ingredients || undefined, image_front_small_url: image || undefined,
+      categories_tags: r.is_drink ? ['en:beverages'] : [], nutriments,
+    };
+  }
+
+  Object.assign(remoteAdmin, {
+    async productRequests() {
+      const rows = await run(sb.rpc('admin_product_requests'));
+      return rows.map((r) => ({ ...r, photo_url: avatarUrl(r.photo_path) }));
+    },
+    async reviewProduct(id, approve) {
+      await run(sb.rpc('admin_review_product', { request_id: id, approve }));
+    },
+  });
+
+  Object.assign(localAdmin, {
+    async productRequests() {
+      const own = store.get('products', {});
+      return store.get('product_requests', []).filter((r) => r.status === 'pending').map((r) => ({ ...r, existing: Boolean(own[r.barcode]) }));
+    },
+    async reviewProduct(id, approve) {
+      const all = store.get('product_requests', []);
+      const r = all.find((x) => x.id === id);
+      if (!r) return;
+      r.status = approve ? 'approved' : 'rejected';
+      if (approve) {
+        const own = store.get('products', {});
+        own[r.barcode] = productCard(r, r.photo_url);
+        store.set('products', own);
+      }
+      store.set('product_requests', all);
+    },
+  });
+
   /* поиск участников по нику (без почты) */
   async function searchUsers(q) {
     const term = String(q || '').trim();
@@ -914,6 +1029,7 @@
     admin: useSupabase ? remoteAdmin : localAdmin,
     profile: useSupabase ? remoteProfile : localProfile,
     dm: useSupabase ? remoteDm : localDm,
+    products: useSupabase ? remoteProducts : localProducts,
     publicProfiles,
     searchUsers,
     checkText,

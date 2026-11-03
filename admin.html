@@ -60,6 +60,7 @@
             <button type="button" data-tab="overview" class="active">📊 Обзор</button>
             <button type="button" data-tab="users">👥 Пользователи</button>
             <button type="button" data-tab="avatars">🖼 Фото <span id="avatars-count"></span></button>
+            <button type="button" data-tab="products">📦 Товары <span id="products-count"></span></button>
             <button type="button" data-tab="forum">💬 Форум</button>
             <button type="button" data-tab="words">🚫 Слова</button>
             <button type="button" data-tab="messages">📩 Сообщения</button>
@@ -81,6 +82,11 @@
         <div data-pane="avatars" class="hidden">
           <p class="muted">Новые фото и баннеры появляются на сайте только после одобрения.</p>
           <div class="avatar-requests" id="avatar-requests"></div>
+        </div>
+
+        <div data-pane="products" class="hidden">
+          <p class="muted">Товары, которые участники добавили через сканер. После одобрения их находят по штрихкоду все. Сверьте КБЖУ с фото упаковки.</p>
+          <div class="posts" id="product-requests"></div>
         </div>
 
         <div data-pane="forum" class="hidden">

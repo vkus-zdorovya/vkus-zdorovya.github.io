@@ -42,6 +42,8 @@ supabase/schema-4-profile.sql   ник, аватарки с проверкой �
 supabase/schema-5-moderation.sql  закреплённые темы, мут, запрещённые слова, баннеры профиля, GIF
 supabase/schema-6-messages.sql    личные сообщения, закреплённые комментарии, «Отвечено»
 supabase/schema-7-search.sql      поиск участников по нику
+supabase/schema-8-products.sql    своя база продуктов для сканера и товары от участников
+supabase/functions/product/       поиск товара по штрихкоду через Supabase (сканер без VPN)
 img/recipes/                      картинки к рецептам (id-рецепта.webp, 640×480) — можно заменить на свои фото
 supabase/functions/admin-reply/   отправка ответов из админки с общей почты
 supabase/email/                 шаблоны писем с кодами (регистрация и вход)
