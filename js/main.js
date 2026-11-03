@@ -124,9 +124,9 @@
   /* число непрочитанных личных сообщений на значке ✉️ */
   async function refreshUnread() {
     const badge = document.getElementById('dm-badge');
-    if (!badge || !DB.dm) return;
+    if (!badge || !(DB.chat || DB.dm)) return;
     let n = 0;
-    try { n = await DB.dm.unread(); } catch { n = 0; }
+    try { n = await (DB.chat || DB.dm).unread(); } catch { n = 0; }
     badge.textContent = n > 99 ? '99+' : String(n);
     badge.classList.toggle('hidden', !n);
   }

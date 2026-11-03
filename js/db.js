@@ -1004,6 +1004,201 @@
     },
   });
 
+
+  /* ===================== Чаты и беседы ===================== */
+
+  // типы файлов, которые принимает закрытое хранилище «chat»; остальное отправляем как «файл»
+  const CHAT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg',
+    'audio/aac', 'audio/x-m4a', 'audio/wav', 'application/pdf', 'text/plain', 'text/csv', 'application/zip', 'application/x-zip-compressed',
+    'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation'];
+  const chatType = (t) => { const base = String(t || '').split(';')[0]; return CHAT_TYPES.includes(base) ? base : 'application/octet-stream'; };
+  const fileExt = (name, type) => {
+    const m = /\.([a-z0-9]{1,8})$/i.exec(name || '');
+    if (m) return m[1].toLowerCase();
+    return { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a' }[type] || 'bin';
+  };
+  const CHAT_MISSING = 'Беседы ещё не подключены: выполните в Supabase файл schema-9-chats.sql';
+  const chatError = (e) => (/chat_|conversation|schema cache/i.test(e.message) && /function|relation|schema cache|does not exist|find/i.test(e.message) ? new Error(CHAT_MISSING) : e);
+
+  const remoteChat = {
+    async list() {
+      try {
+        const rows = await run(sb.rpc('chat_list'));
+        return rows.map((r) => ({ ...r, peer_avatar: avatarUrl(r.peer_avatar) }));
+      } catch (e) { throw chatError(e); }
+    },
+    async openDirect(peer) { try { return await run(sb.rpc('chat_open_direct', { peer })); } catch (e) { throw chatError(e); } },
+    async createGroup(title, members) { return run(sb.rpc('chat_create_group', { title, members })); },
+    async members(conv) {
+      const rows = await run(sb.rpc('chat_members', { conv }));
+      return rows.map((r) => ({ ...r, avatar_url: avatarUrl(r.avatar_url) }));
+    },
+    async messages(conv) {
+      const rows = await run(sb.from('chat_messages').select('*').eq('conversation_id', conv).order('created_at', { ascending: false }).limit(300));
+      return rows.reverse();
+    },
+    async send(conv, msg) {
+      const row = { conversation_id: conv, body: msg.body || null, kind: msg.kind || 'text' };
+      if (msg.file) {
+        const type = chatType(msg.file.type);
+        const path = `${conv}/${newId()}.${fileExt(msg.name, type)}`;
+        await run(sb.storage.from('chat').upload(path, msg.file, { contentType: type, upsert: false }));
+        Object.assign(row, { file_path: path, file_name: (msg.name || 'файл').slice(0, 200), file_size: msg.file.size, file_type: type, duration: msg.duration || null });
+      }
+      return run(sb.from('chat_messages').insert(row).select().single());
+    },
+    async remove(id) { await run(sb.from('chat_messages').delete().eq('id', id)); },
+    async markRead(conv) { await run(sb.rpc('chat_mark_read', { conv })); },
+    async addMembers(conv, members) { await run(sb.rpc('chat_add_members', { conv, members })); },
+    async removeMember(conv, member) { await run(sb.rpc('chat_remove_member', { conv, member })); },
+    async leave(conv) { await run(sb.rpc('chat_leave', { conv })); },
+    async rename(conv, title) { await run(sb.rpc('chat_rename', { conv, title })); },
+    /* ссылки на файлы закрытые: выдаём временные, на час */
+    async fileUrls(paths) {
+      if (!paths.length) return {};
+      const { data, error } = await sb.storage.from('chat').createSignedUrls(paths, 3600);
+      if (error) throw humanError(error);
+      return Object.fromEntries((data || []).filter((x) => x.signedUrl).map((x) => [x.path, x.signedUrl]));
+    },
+    async unread() {
+      try { return (await run(sb.rpc('chat_unread_count'))) || 0; } catch { return remoteDm.unread(); }
+    },
+  };
+
+  /* демо-режим: всё хранится в браузере, файлы — до 2 МБ */
+  const localChat = {
+    async me() {
+      const user = await local.auth.getUser();
+      if (!user) throw new Error('Сначала войдите в аккаунт');
+      return user;
+    },
+    users() { return Object.values(store.get('users', {})); },
+    nameOf(id) { const u = localChat.users().find((x) => x.id === id); return (u && u.name) || 'Пользователь'; },
+    sys(conv, body) {
+      const all = store.get('chat_msgs', []);
+      all.push({ id: newId(), conversation_id: conv, sender_id: null, body, kind: 'system', created_at: new Date().toISOString() });
+      store.set('chat_msgs', all);
+    },
+    mem() { return store.get('chat_members', []); },
+    isMember(conv, uid) { return localChat.mem().some((m) => m.conversation_id === conv && m.user_id === uid); },
+    async list() {
+      const me = await localChat.me();
+      const chats = store.get('chats', []);
+      const msgs = store.get('chat_msgs', []);
+      return localChat.mem().filter((m) => m.user_id === me.id).map((m) => {
+        const c = chats.find((x) => x.id === m.conversation_id);
+        if (!c) return null;
+        const list = msgs.filter((x) => x.conversation_id === c.id);
+        const last = list[list.length - 1];
+        const peerId = c.is_group ? null : (localChat.mem().find((x) => x.conversation_id === c.id && x.user_id !== me.id) || {}).user_id;
+        const peer = localChat.users().find((u) => u.id === peerId);
+        return {
+          id: c.id, title: c.is_group ? c.title : localChat.nameOf(peerId), is_group: c.is_group, peer_id: peerId || null,
+          peer_avatar: (peer && peer.avatar_url) || null, members: localChat.mem().filter((x) => x.conversation_id === c.id).length,
+          last_body: last ? last.body : null, last_kind: last ? last.kind : null, last_sender: last && last.sender_id ? localChat.nameOf(last.sender_id) : null,
+          last_from_me: Boolean(last && last.sender_id === me.id), last_at: last ? last.created_at : c.created_at,
+          unread: list.filter((x) => x.created_at > m.last_read_at && x.sender_id !== me.id && x.kind !== 'system').length,
+        };
+      }).filter(Boolean).sort((a, b) => b.last_at.localeCompare(a.last_at));
+    },
+    async openDirect(peer) {
+      const me = await localChat.me();
+      if (peer === me.id) throw new Error('Нельзя написать самому себе');
+      if (!localChat.users().some((u) => u.id === peer)) throw new Error('Пользователь не найден');
+      const key = [me.id, peer].sort().join(':');
+      const chats = store.get('chats', []);
+      let c = chats.find((x) => x.direct_key === key);
+      if (!c) {
+        c = { id: newId(), is_group: false, direct_key: key, created_by: me.id, created_at: new Date().toISOString() };
+        chats.push(c);
+        store.set('chats', chats);
+        const now = new Date().toISOString();
+        store.set('chat_members', [...localChat.mem(), { conversation_id: c.id, user_id: me.id, role: 'owner', joined_at: now, last_read_at: now },
+          { conversation_id: c.id, user_id: peer, role: 'member', joined_at: now, last_read_at: now }]);
+      }
+      return c.id;
+    },
+    async createGroup(title, members) {
+      const me = await localChat.me();
+      const t = String(title || '').trim();
+      if (!t || t.length > 60) throw new Error('Название беседы — от 1 до 60 символов');
+      const ids = [...new Set(members)].filter((id) => id !== me.id);
+      if (!ids.length) throw new Error('Добавьте хотя бы одного участника');
+      const c = { id: newId(), title: t, is_group: true, created_by: me.id, created_at: new Date().toISOString() };
+      store.set('chats', [...store.get('chats', []), c]);
+      const now = new Date().toISOString();
+      store.set('chat_members', [...localChat.mem(), { conversation_id: c.id, user_id: me.id, role: 'owner', joined_at: now, last_read_at: now },
+        ...ids.map((id) => ({ conversation_id: c.id, user_id: id, role: 'member', joined_at: now, last_read_at: now }))]);
+      localChat.sys(c.id, `${me.name} создал(а) беседу «${t}»`);
+      return c.id;
+    },
+    async members(conv) {
+      return localChat.mem().filter((m) => m.conversation_id === conv).map((m) => {
+        const u = localChat.users().find((x) => x.id === m.user_id) || {};
+        return { user_id: m.user_id, name: u.name || 'Пользователь', avatar_url: u.avatar_url || null, role: m.role, last_read_at: m.last_read_at };
+      });
+    },
+    async messages(conv) {
+      const me = await localChat.me();
+      if (!localChat.isMember(conv, me.id)) throw new Error('Нет доступа');
+      return store.get('chat_msgs', []).filter((m) => m.conversation_id === conv);
+    },
+    async send(conv, msg) {
+      const me = await localChat.me();
+      if (!localChat.isMember(conv, me.id)) throw new Error('Нет доступа');
+      localGuard(me, [msg.body, msg.name].filter(Boolean).join(' '));
+      const row = { id: newId(), conversation_id: conv, sender_id: me.id, body: msg.body || null, kind: msg.kind || 'text', created_at: new Date().toISOString() };
+      if (msg.file) {
+        if (msg.file.size > 2 * 1024 * 1024) throw new Error('В демо-режиме файлы до 2 МБ');
+        row.file_url = await new Promise((resolve) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.readAsDataURL(msg.file); });
+        Object.assign(row, { file_path: `${conv}/${row.id}`, file_name: msg.name || 'файл', file_size: msg.file.size, file_type: chatType(msg.file.type), duration: msg.duration || null });
+      }
+      store.set('chat_msgs', [...store.get('chat_msgs', []), row]);
+      return row;
+    },
+    async remove(id) { store.set('chat_msgs', store.get('chat_msgs', []).filter((m) => m.id !== id)); },
+    async markRead(conv) {
+      const me = await localChat.me();
+      store.set('chat_members', localChat.mem().map((m) => (m.conversation_id === conv && m.user_id === me.id ? { ...m, last_read_at: new Date().toISOString() } : m)));
+    },
+    async addMembers(conv, members) {
+      const me = await localChat.me();
+      const now = new Date().toISOString();
+      const fresh = [...new Set(members)].filter((id) => !localChat.isMember(conv, id));
+      store.set('chat_members', [...localChat.mem(), ...fresh.map((id) => ({ conversation_id: conv, user_id: id, role: 'member', joined_at: now, last_read_at: now }))]);
+      if (fresh.length) localChat.sys(conv, `${me.name} добавил(а): ${fresh.map(localChat.nameOf).join(', ')}`);
+    },
+    async removeMember(conv, member) {
+      const me = await localChat.me();
+      const mine = localChat.mem().find((m) => m.conversation_id === conv && m.user_id === me.id);
+      if (!mine || mine.role !== 'owner') throw new Error('Исключать участников может только создатель беседы');
+      store.set('chat_members', localChat.mem().filter((m) => !(m.conversation_id === conv && m.user_id === member)));
+      localChat.sys(conv, `${me.name} исключил(а) ${localChat.nameOf(member)}`);
+    },
+    async leave(conv) {
+      const me = await localChat.me();
+      const wasOwner = (localChat.mem().find((m) => m.conversation_id === conv && m.user_id === me.id) || {}).role === 'owner';
+      let rest = localChat.mem().filter((m) => !(m.conversation_id === conv && m.user_id === me.id));
+      const left = rest.filter((m) => m.conversation_id === conv);
+      if (wasOwner && left.length) rest = rest.map((m) => (m === left[0] ? { ...m, role: 'owner' } : m));
+      store.set('chat_members', rest);
+      if (left.length) localChat.sys(conv, `${me.name} вышел(ла) из беседы`);
+    },
+    async rename(conv, title) {
+      const me = await localChat.me();
+      const t = String(title || '').trim();
+      if (!t || t.length > 60) throw new Error('Название беседы — от 1 до 60 символов');
+      store.set('chats', store.get('chats', []).map((c) => (c.id === conv ? { ...c, title: t } : c)));
+      localChat.sys(conv, `${me.name} переименовал(а) беседу в «${t}»`);
+    },
+    async fileUrls() { return {}; },
+    async unread() {
+      try { return (await localChat.list()).reduce((n, c) => n + c.unread, 0); } catch { return 0; }
+    },
+  };
+
   /* поиск участников по нику (без почты) */
   async function searchUsers(q) {
     const term = String(q || '').trim();
@@ -1033,6 +1228,7 @@
     profile: useSupabase ? remoteProfile : localProfile,
     dm: useSupabase ? remoteDm : localDm,
     products: useSupabase ? remoteProducts : localProducts,
+    chat: useSupabase ? remoteChat : localChat,
     publicProfiles,
     searchUsers,
     checkText,

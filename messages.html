@@ -35,27 +35,81 @@
 
       <div class="dm-layout hidden" id="dm">
         <aside class="card dm-list">
-          <h1 class="dm-title">Сообщения</h1>
+          <div class="dm-list-head">
+            <h1 class="dm-title">Сообщения</h1>
+            <button class="btn btn-primary btn-sm" type="button" id="new-group">👥 Новая беседа</button>
+          </div>
           <div data-user-search data-mode="dm" data-placeholder="🔍 Найти, кому написать"></div>
           <div id="dm-conversations"><p class="muted small">Загрузка…</p></div>
         </aside>
 
         <section class="card dm-chat" id="dm-chat">
-          <div class="dm-empty muted" id="dm-empty">Выберите диалог слева</div>
+          <div class="dm-empty muted" id="dm-empty">Выберите диалог слева или создайте беседу</div>
           <div class="dm-chat-inner hidden" id="dm-chat-inner">
             <div class="dm-chat-head">
               <button class="icon-btn dm-back" type="button" id="dm-back" aria-label="Назад к диалогам">←</button>
-              <a class="post-author" id="dm-peer" href="#"></a>
+              <a class="dm-peer" id="dm-peer" href="#"></a>
+              <button class="icon-btn hidden" type="button" id="dm-info-btn" aria-label="Участники и настройки беседы" title="Участники">👥</button>
             </div>
+
+            <div class="dm-info hidden" id="dm-info">
+              <div class="dm-info-row">
+                <form class="dm-rename" id="dm-rename" novalidate>
+                  <label class="sr-only" for="dm-rename-input">Название беседы</label>
+                  <input class="input" id="dm-rename-input" maxlength="60">
+                  <button class="btn btn-ghost btn-sm" type="submit">Сохранить</button>
+                </form>
+              </div>
+              <h3 class="dm-info-title">Участники <span id="dm-members-count"></span></h3>
+              <div class="dm-members" id="dm-members"></div>
+              <div class="dm-add">
+                <p class="small muted">Добавить людей:</p>
+                <div data-picker id="dm-add-picker"></div>
+                <button class="btn btn-primary btn-sm hidden" type="button" id="dm-add-btn">Добавить</button>
+              </div>
+              <button class="btn btn-danger btn-sm" type="button" id="dm-leave">Выйти из беседы</button>
+            </div>
+
             <div class="dm-messages" id="dm-messages" aria-live="polite"></div>
+
+            <div class="dm-attach hidden" id="dm-attach"></div>
             <form class="dm-form" id="dm-form" novalidate>
+              <label class="icon-btn dm-tool" for="dm-file" title="Фото или файл" aria-label="Прикрепить фото или файл">📎</label>
+              <input type="file" id="dm-file" class="sr-only">
               <label class="sr-only" for="dm-input">Сообщение</label>
-              <textarea class="textarea" id="dm-input" rows="1" maxlength="2000" placeholder="Сообщение…"></textarea>
+              <textarea class="textarea" id="dm-input" rows="1" maxlength="4000" placeholder="Сообщение…"></textarea>
+              <button class="icon-btn dm-tool" type="button" id="dm-mic" title="Голосовое сообщение" aria-label="Записать голосовое">🎤</button>
               <button class="btn btn-primary" type="submit" aria-label="Отправить">➤</button>
             </form>
+            <div class="dm-recording hidden" id="dm-recording">
+              <span class="rec-dot" aria-hidden="true"></span>
+              <span id="dm-rec-time">0:00</span>
+              <span class="small muted">Идёт запись…</span>
+              <button class="btn btn-ghost btn-sm" type="button" id="dm-rec-cancel">✕ Отмена</button>
+              <button class="btn btn-primary btn-sm" type="button" id="dm-rec-send">➤ Отправить</button>
+            </div>
           </div>
         </section>
       </div>
+
+      <dialog class="modal" id="group-modal" aria-labelledby="gm-title">
+        <form class="modal-body" id="group-form" method="dialog" novalidate>
+          <button class="icon-btn modal-close" type="button" data-close aria-label="Закрыть">✕</button>
+          <h2 id="gm-title" style="font-size:1.4rem">Новая беседа</h2>
+          <div class="field" style="margin:16px 0">
+            <label for="gm-name">Название</label>
+            <input class="input" id="gm-name" maxlength="60" placeholder="Например: Марафон «Минус 5 кг»" required>
+          </div>
+          <div class="field">
+            <span class="label">Участники</span>
+            <div data-picker id="gm-picker"></div>
+          </div>
+          <p class="form-error" role="alert"></p>
+          <button class="btn btn-primary btn-block" type="submit">Создать беседу</button>
+        </form>
+      </dialog>
+
+      <div class="img-viewer hidden" id="img-viewer" role="dialog" aria-label="Фото"><img alt=""><button class="lightbox-close" type="button" aria-label="Закрыть">✕</button></div>
     </section>
   </main>
 
