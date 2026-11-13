@@ -1,0 +1,34 @@
+# Не даёт бесплатному проекту Supabase уснуть: раз в день делает один запрос к базе.
+# Адрес и публичный ключ берутся из js/config.js — менять здесь ничего не нужно.
+name: Keep Supabase awake
+
+on:
+  schedule:
+    - cron: '17 5 * * *'   # каждый день в 08:17 по Москве
+  workflow_dispatch:        # кнопка «Run workflow» для ручного запуска
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Запрос к базе
+        run: |
+          URL=$(sed -n "s/.*SUPABASE_URL: *'\([^']*\)'.*/\1/p" js/config.js | head -1)
+          KEY=$(sed -n "s/.*SUPABASE_ANON_KEY: *'\([^']*\)'.*/\1/p" js/config.js | head -1)
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            echo "Не нашёл адрес или ключ Supabase в js/config.js"; exit 1
+          fi
+          CODE=$(curl -sS -o /tmp/answer.txt -w '%{http_code}' --max-time 60 --retry 3 --retry-delay 20 \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+            "$URL/rest/v1/forum_posts?select=id&limit=1")
+          echo "Ответ базы: $CODE"
+          if [ "$CODE" != "200" ]; then
+            echo "База не ответила. Если проект на паузе, откройте панель Supabase и нажмите Restore project."
+            head -c 500 /tmp/answer.txt; exit 1
+          fi
