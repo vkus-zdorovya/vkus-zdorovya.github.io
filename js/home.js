@@ -5,13 +5,27 @@
   const form = document.getElementById('quick-bmi');
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    const h = parseFloat(form.height.value);
-    const w = parseFloat(form.weight.value);
-    form.height.classList.toggle('invalid', !(h >= 100 && h <= 250));
-    form.weight.classList.toggle('invalid', !(w >= 25 && w <= 300));
-    if (!(h >= 100 && h <= 250 && w >= 25 && w <= 300)) return;
+    const h = parseFloat(String(form.height.value).replace(',', '.'));
+    const w = parseFloat(String(form.weight.value).replace(',', '.'));
+    const okH = h >= 100 && h <= 250;
+    const okW = w >= 25 && w <= 300;
+    form.height.classList.toggle('invalid', !okH);
+    form.weight.classList.toggle('invalid', !okW);
+    form.height.setAttribute('aria-invalid', String(!okH));
+    form.weight.setAttribute('aria-invalid', String(!okW));
+    const error = document.getElementById('qb-error');
+    if (!okH || !okW) {
+      // старый результат не должен оставаться на экране рядом с неверными данными
+      document.getElementById('qb-result').classList.add('hidden');
+      error.textContent = !okH
+        ? (h > 0 && h < 3 ? 'Укажите рост в сантиметрах, а не в метрах (например, 170)' : 'Укажите рост от 100 до 250 см')
+        : 'Укажите вес от 25 до 300 кг';
+      return;
+    }
+    error.textContent = '';
 
-    const bmi = w / (h / 100) ** 2;
+    // категория считается по тому же числу, что показано на экране (округлённому до 0,1)
+    const bmi = Math.round((w / (h / 100) ** 2) * 10) / 10;
     const cat = window.bmiCategory(bmi);
     document.getElementById('qb-value').textContent = bmi.toFixed(1).replace('.', ',');
     const note = document.getElementById('qb-note');

@@ -260,8 +260,11 @@ window.BMI_CATEGORIES = [
   { max: Infinity, key: 'obese3', label: 'Ожирение III степени', color: '#b5281c' },
 ];
 
+/* ИМТ везде показывается с одним знаком после запятой — по этому же числу определяем категорию,
+   чтобы не выходило «18,5 — недостаток веса» */
 window.bmiCategory = function (bmi) {
-  return window.BMI_CATEGORIES.find((c) => bmi < c.max);
+  const shown = Math.round(bmi * 10) / 10;
+  return window.BMI_CATEGORIES.find((c) => shown < c.max) || window.BMI_CATEGORIES[window.BMI_CATEGORIES.length - 1];
 };
 
 /* Свойства продуктов для фильтров рецептов */
