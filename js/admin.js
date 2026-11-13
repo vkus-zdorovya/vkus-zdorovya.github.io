@@ -45,7 +45,7 @@
 
   /* ---------- вкладки ---------- */
 
-  const loaders = { overview: loadStats, users: loadUsers, avatars: loadAvatars, products: loadProducts, forum: loadForum, words: loadWords, messages: loadMessages };
+  const loaders = { overview: loadStats, users: loadUsers, avatars: loadAvatars, products: loadProducts, recipes: loadRecipes, reports: loadReports, challenges: loadChallenges, forum: loadForum, words: loadWords, messages: loadMessages };
   $('admin-tabs').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-tab]');
     if (!btn) return;
@@ -305,6 +305,149 @@
     }
   });
 
+  /* ---------- рецепты участников ---------- */
+
+  const MEAL_RU = { breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин', snack: 'Перекус' };
+  const TAG_RU = { veg: 'Вегетарианское', vegan: 'Веганское', gf: 'Без глютена', lf: 'Без лактозы' };
+  const MISSING10 = 'Выполните в Supabase файл schema-10-community.sql, чтобы включить этот раздел';
+  const need10 = (error) => (/schema cache|does not exist|could not find|schema-10/i.test(error.message) ? new Error(MISSING10) : error);
+
+  let recipeRequests = [];
+  function loadRecipes() {
+    const box = $('recipe-requests');
+    return guard(box, async () => {
+      try { recipeRequests = await DB.admin.recipeRequests(); } catch (error) { throw need10(error); }
+      $('recipes-count').textContent = recipeRequests.length ? `(${recipeRequests.length})` : '';
+      const n = (v) => Number(v).toLocaleString('ru-RU');
+      box.innerHTML = recipeRequests.length ? recipeRequests.map((r, i) => {
+        const est = 4 * Number(r.protein) + 9 * Number(r.fat) + 4 * Number(r.carbs);
+        return `
+        <article class="card post" data-i="${i}">
+          <div class="product-request-body">
+            ${r.photo_url ? `<div class="product-request-photos"><a href="${esc(r.photo_url)}" target="_blank" rel="noopener"><img src="${esc(r.photo_url)}" alt="Фото блюда"></a></div>` : ''}
+            <div style="min-width:0">
+              <h3>${esc(r.title)}</h3>
+              <div class="muted">${MEAL_RU[r.meal] || ''} · ${r.minutes} мин · порция ${n(r.portion)} г</div>
+              <div class="tags" style="margin-top:8px">
+                <span class="tag">🔥 ${n(r.kcal)} ккал</span><span class="tag">Б ${n(r.protein)}</span><span class="tag">Ж ${n(r.fat)}</span><span class="tag">У ${n(r.carbs)}</span>
+                ${(r.tags || []).map((t) => `<span class="tag">${TAG_RU[t] || t}</span>`).join('')}
+              </div>
+              ${Math.abs(Number(r.kcal) - est) > Math.max(40, est * 0.2) ? `<p class="small kcal-warn">⚠️ Калории не сходятся с БЖУ: по расчёту ≈ ${Math.round(est)} ккал.</p>` : ''}
+              <p class="small" style="margin:10px 0 0;white-space:pre-wrap"><b>Ингредиенты:</b>\n${esc(r.ingredients)}</p>
+              <p class="small" style="margin:10px 0 0;white-space:pre-wrap"><b>Приготовление:</b>\n${esc(r.steps)}</p>
+              <div class="small muted" style="margin-top:8px">Автор: ${esc(r.author_name || '—')} (${esc(r.author_email || '')}), ${fmt(r.created_at)}</div>
+            </div>
+          </div>
+          <div class="post-foot">
+            <button class="btn btn-primary btn-sm" type="button" data-approve-recipe>✓ Опубликовать</button>
+            <button class="btn btn-danger btn-sm" type="button" data-reject-recipe>✕ Отклонить</button>
+          </div>
+        </article>`;
+      }).join('') : '<div class="card muted center">Новых рецептов нет.</div>';
+    });
+  }
+  $('recipe-requests').addEventListener('click', async (e) => {
+    const card = e.target.closest('.post');
+    const approve = e.target.closest('[data-approve-recipe]');
+    const reject = e.target.closest('[data-reject-recipe]');
+    if (!card || (!approve && !reject)) return;
+    const r = recipeRequests[Number(card.dataset.i)];
+    try {
+      await DB.admin.reviewRecipe(r.id, Boolean(approve));
+      toast(approve ? `«${r.title}» опубликован` : 'Рецепт отклонён');
+      loadRecipes();
+    } catch (error) { toast(error.message, 'error'); }
+  });
+
+  /* ---------- жалобы ---------- */
+
+  const REPORT_KIND = { post: '💬 Тема на форуме', reply: '↩️ Ответ на форуме', message: '✉️ Сообщение в чате', profile: '👤 Профиль' };
+  let reports = [];
+  function loadReports() {
+    const box = $('reports');
+    return guard(box, async () => {
+      try { reports = await DB.admin.reports(); } catch (error) { throw need10(error); }
+      $('reports-count').textContent = reports.length ? `(${reports.length})` : '';
+      box.innerHTML = reports.length ? reports.map((r, i) => `
+        <article class="card post" data-i="${i}">
+          <div class="post-meta">
+            <span class="badge">${REPORT_KIND[r.kind] || r.kind}</span>
+            ${r.same_target > 1 ? `<span class="badge badge-new">жалоб: ${r.same_target}</span>` : ''}
+            <span>${fmt(r.created_at)}</span>
+          </div>
+          <div class="post-body report-excerpt">${esc(r.excerpt || '—')}</div>
+          <p class="small" style="margin:10px 0 0"><b>Причина:</b> ${esc(r.reason || 'не указана')}</p>
+          <p class="small muted" style="margin:6px 0 0">На кого: <a href="profile.html?id=${encodeURIComponent(r.target_user)}" target="_blank" rel="noopener">${esc(r.target_name)}</a> (${esc(r.target_email || '')}) · пожаловался: ${esc(r.reporter_name)}</p>
+          <div class="post-foot">
+            ${r.kind !== 'profile' ? '<button class="btn btn-danger btn-sm" type="button" data-report-delete>🗑 Удалить нарушение</button>' : ''}
+            <button class="btn btn-ghost btn-sm" type="button" data-report-mute>🔇 Замутить автора на сутки</button>
+            <button class="btn btn-ghost btn-sm" type="button" data-report-dismiss>Нарушения нет</button>
+          </div>
+        </article>`).join('') : '<div class="card muted center">Открытых жалоб нет.</div>';
+    });
+  }
+  $('reports').addEventListener('click', async (e) => {
+    const card = e.target.closest('.post');
+    if (!card) return;
+    const r = reports[Number(card.dataset.i)];
+    try {
+      if (e.target.closest('[data-report-delete]')) {
+        if (!confirm('Удалить то, на что пожаловались? Это нельзя отменить.')) return;
+        await DB.admin.resolveReport(r.id, 'delete');
+        toast('Нарушение удалено, жалоба закрыта');
+        loadReports();
+      } else if (e.target.closest('[data-report-dismiss]')) {
+        await DB.admin.resolveReport(r.id, 'dismiss');
+        toast('Жалоба отклонена');
+        loadReports();
+      } else if (e.target.closest('[data-report-mute]')) {
+        await DB.admin.mute(r.target_user, new Date(Date.now() + 24 * 3600 * 1000).toISOString(), 'Нарушение правил: ' + (r.reason || 'жалоба участников'));
+        toast(`${r.target_name} замучен на сутки`);
+      }
+    } catch (error) { toast(error.message, 'error'); }
+  });
+
+  /* ---------- челленджи ---------- */
+
+  function loadChallenges() {
+    const box = $('admin-challenges');
+    return guard(box, async () => {
+      let list;
+      try { list = await DB.challenges.list(); } catch (error) { throw need10(error); }
+      box.innerHTML = list.length ? list.map((c) => `
+        <article class="card post" data-id="${esc(String(c.id))}">
+          <h3>${esc(c.emoji)} ${esc(c.title)}</h3>
+          <div class="post-meta"><span>${c.days} дн.</span><span>участников: ${c.members}</span></div>
+          <div class="post-body">${esc(c.description || '')}</div>
+          <div class="post-foot"><button class="btn btn-danger btn-sm" type="button" data-del-challenge>Удалить</button></div>
+        </article>`).join('') : '<div class="card muted center">Челленджей пока нет.</div>';
+    });
+  }
+  $('challenge-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const err = e.target.querySelector('.form-error');
+    const fields = { emoji: $('ch-emoji').value.trim() || '🎯', title: $('ch-title').value.trim(), days: Number($('ch-days').value), description: $('ch-desc').value.trim() || null };
+    if (fields.title.length < 3 || !(fields.days >= 1 && fields.days <= 90)) { err.textContent = 'Название — от 3 букв, длительность — от 1 до 90 дней'; return; }
+    err.textContent = '';
+    try {
+      await DB.challenges.create(fields);
+      e.target.reset();
+      toast('Челлендж создан');
+      loadChallenges();
+    } catch (error) { err.textContent = need10(error).message; }
+  });
+  $('admin-challenges').addEventListener('click', async (e) => {
+    const card = e.target.closest('.post');
+    if (!card || !e.target.closest('[data-del-challenge]')) return;
+    if (!confirm('Удалить челлендж вместе с отметками участников?')) return;
+    const id = /^\d+$/.test(card.dataset.id) ? Number(card.dataset.id) : card.dataset.id;
+    try {
+      await DB.challenges.remove(id);
+      toast('Челлендж удалён');
+      loadChallenges();
+    } catch (error) { toast(error.message, 'error'); }
+  });
+
   /* ---------- запрещённые слова ---------- */
 
   function loadWords() {
@@ -548,5 +691,11 @@
     }
     showOnly('panel');
     loadStats();
+    // счётчики на вкладках: сколько товаров, рецептов и жалоб ждут проверки
+    DB.admin.queueCounts().then((q) => {
+      [['products', 'products-count'], ['recipes', 'recipes-count'], ['reports', 'reports-count']].forEach(([key, id]) => {
+        $(id).textContent = q && q[key] ? `(${q[key]})` : '';
+      });
+    }).catch(() => {});
   });
 })();

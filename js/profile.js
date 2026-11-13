@@ -28,7 +28,36 @@
           ${me && me.id === id
             ? '<a class="btn btn-ghost btn-sm" href="account.html">Редактировать</a>'
             : `<a class="btn btn-primary btn-sm" href="${me ? `messages.html?to=${encodeURIComponent(id)}` : 'login.html'}">✉️ Написать</a>`}
-        </div>`;
+        </div>
+        <div class="profile-badges" id="profile-badges"></div>
+        ${me && me.id !== id ? `<div class="profile-tools">
+          <button class="link-btn" type="button" id="block-btn"></button>
+          <button class="link-btn danger" type="button" id="report-btn">🚩 Пожаловаться</button>
+        </div>` : ''}`;
+
+      // достижения: показываем только полученные
+      DB.stats(id).then((st) => {
+        const earned = window.BADGES.filter((b) => Number(st[b.key] || 0) >= b.goal);
+        document.getElementById('profile-badges').innerHTML = earned.length
+          ? `<div class="badges-inline">${earned.map((b) => `<span title="${esc(b.desc)}">${b.icon} ${esc(b.title)}</span>`).join('')}</div>` : '';
+      }).catch(() => {});
+
+      if (me && me.id !== id) {
+        const blockBtn = document.getElementById('block-btn');
+        let blocked = (await DB.blocks.list().catch(() => [])).includes(id);
+        const paint = () => { blockBtn.textContent = blocked ? '✓ Вы заблокировали этого участника — разблокировать' : '🚫 Заблокировать'; };
+        paint();
+        blockBtn.addEventListener('click', async () => {
+          if (!blocked && !confirm(`Заблокировать ${p.name}? Он не сможет писать вам в личные сообщения и добавлять в беседы.`)) return;
+          try {
+            await DB.blocks.set(id, !blocked);
+            blocked = !blocked;
+            paint();
+            UI.toast(blocked ? 'Участник заблокирован' : 'Участник разблокирован');
+          } catch (error) { UI.toast(error.message, 'error'); }
+        });
+        document.getElementById('report-btn').addEventListener('click', () => UI.reportDialog('profile', id));
+      }
 
       const posts = await DB.forum.list(id);
       const list = document.getElementById('user-posts');

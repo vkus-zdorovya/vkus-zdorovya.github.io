@@ -85,7 +85,27 @@
       link.innerHTML = `${chatAvatar(current, 'avatar-md')}<span class="dm-peer-text"><b>${esc(current.title)}</b></span>`;
     }
     $('dm-info-btn').classList.toggle('hidden', !current.is_group);
+    const blockBtn = $('dm-block-btn');
+    const isBlocked = !current.is_group && blocked.includes(current.peer_id);
+    blockBtn.classList.toggle('hidden', current.is_group);
+    blockBtn.textContent = isBlocked ? '✅' : '🚫';
+    blockBtn.title = isBlocked ? 'Разблокировать собеседника' : 'Заблокировать собеседника';
+    blockBtn.setAttribute('aria-label', blockBtn.title);
+    $('dm-blocked').classList.toggle('hidden', !isBlocked);
   }
+
+  let blocked = [];
+  $('dm-block-btn').addEventListener('click', async () => {
+    if (!current || current.is_group) return;
+    const on = !blocked.includes(current.peer_id);
+    if (on && !confirm(`Заблокировать ${current.title}? Он не сможет писать вам и добавлять вас в беседы.`)) return;
+    try {
+      await DB.blocks.set(current.peer_id, on);
+      blocked = on ? [...blocked, current.peer_id] : blocked.filter((x) => x !== current.peer_id);
+      renderHead();
+      toast(on ? 'Собеседник заблокирован' : 'Собеседник разблокирован');
+    } catch (error) { toast(error.message, 'error'); }
+  });
 
   async function openChat(id, push = true) {
     let c = chats.find((x) => same(x.id, id));
@@ -159,7 +179,7 @@
         <div class="dm-msg-col">
           ${showName ? `<div class="dm-name">${esc(name)}</div>` : ''}
           <div class="dm-bubble${media && !m.body ? ' only-media' : ''}">${media}${m.body ? `<div class="dm-text">${esc(m.body)}</div>` : ''}</div>
-          <div class="dm-meta">${esc(time(m.created_at))}${read}${mine ? ' <button class="link-btn" type="button" data-del-msg>удалить</button>' : ''}</div>
+          <div class="dm-meta">${esc(time(m.created_at))}${read}${mine ? ' <button class="link-btn" type="button" data-del-msg>удалить</button>' : ' <button class="link-btn" type="button" data-report-msg>пожаловаться</button>'}</div>
         </div>
       </div>`;
   }
@@ -538,6 +558,8 @@
       box.classList.remove('hidden');
       return;
     }
+    const rep = e.target.closest('[data-report-msg]');
+    if (rep) { UI.reportDialog('message', rep.closest('.dm-msg').dataset.id); return; }
     const del = e.target.closest('[data-del-msg]');
     if (!del || !confirm('Удалить сообщение у всех участников?')) return;
     try {
@@ -565,6 +587,7 @@
       return;
     }
     $('dm').classList.remove('hidden');
+    blocked = await DB.blocks.list().catch(() => []);
     await loadChats();
     const params = new URLSearchParams(location.search);
     const to = params.get('to');

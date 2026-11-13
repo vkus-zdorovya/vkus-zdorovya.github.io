@@ -8,6 +8,12 @@
     ['diary.html', 'Дневник'],
     ['scanner.html', 'Сканер'],
     ['forum.html', 'Форум'],
+  ];
+  /* то, что не помещается в строку: на компьютере — под кнопкой «Ещё», на телефоне — в общем меню */
+  const NAV_MORE = [
+    ['challenges.html', 'Челленджи'],
+    ['articles.html', 'Статьи'],
+    ['shopping.html', 'Список покупок'],
     ['account.html', 'Кабинет'],
   ];
   const FOOTER_NAV = [
@@ -16,6 +22,8 @@
     ['index.html#nutrition', 'Питание'],
     ['calculator.html', 'Калькулятор'],
     ['recipes.html', 'Рецепты'],
+    ['articles.html', 'Статьи'],
+    ['challenges.html', 'Челленджи'],
     ['forum.html', 'Форум'],
   ];
 
@@ -56,10 +64,16 @@
   function renderHeader() {
     const header = document.getElementById('site-header');
     if (!header) return;
-    const links = NAV.map(([href, label]) => {
+    const link = ([href, label]) => {
       const active = href === page ? ' class="active" aria-current="page"' : '';
       return `<a href="${href}"${active}>${label}</a>`;
-    }).join('');
+    };
+    const inMore = NAV_MORE.some(([href]) => href === page) || page === 'admin.html';
+    const links = NAV.map(link).join('') + `
+      <div class="nav-more" id="nav-more">
+        <button type="button" class="nav-more-btn${inMore ? ' active' : ''}" aria-expanded="false" aria-controls="nav-more-list">Ещё <span aria-hidden="true">▾</span></button>
+        <div class="nav-more-list" id="nav-more-list">${NAV_MORE.map(link).join('')}</div>
+      </div>`;
     header.className = 'site-header';
     header.innerHTML = `
       <div class="container">
@@ -80,6 +94,13 @@
       banner.textContent = 'Демо-режим: база данных не подключена, данные сохраняются только в этом браузере.';
       header.after(banner);
     }
+
+    const more = header.querySelector('#nav-more');
+    const moreBtn = more.querySelector('.nav-more-btn');
+    const setMore = (open) => { more.classList.toggle('open', open); moreBtn.setAttribute('aria-expanded', String(open)); };
+    moreBtn.addEventListener('click', (e) => { e.stopPropagation(); setMore(!more.classList.contains('open')); });
+    document.addEventListener('click', (e) => { if (!more.contains(e.target)) setMore(false); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setMore(false); });
 
     const burger = header.querySelector('.burger');
     const setOpen = (open) => {
@@ -103,14 +124,17 @@
     }
     if (user) {
       box.innerHTML = `<a class="icon-btn dm-btn${page === 'messages.html' ? ' active' : ''}" href="messages.html" aria-label="Личные сообщения" title="Личные сообщения">✉️<span class="count-badge hidden" id="dm-badge"></span></a>
+        <button class="icon-btn notif-btn" type="button" id="notif-btn" aria-label="Уведомления" title="Уведомления" aria-expanded="false" aria-controls="notif-panel">🔔<span class="count-badge hidden" id="notif-badge"></span></button>
+        <div class="notif-panel hidden" id="notif-panel" role="region" aria-label="Уведомления"></div>
         <a class="user-chip post-author" href="account.html" title="${esc(user.email)}">${avatarHtml(user.name, user.avatar_url, 'avatar-sm')}<span class="chip-name">${esc(user.name)}</span></a>
         <button class="btn btn-ghost btn-sm" type="button" id="logout-btn">Выйти</button>`;
       if (user.role === 'admin') {
-        const nav = document.getElementById('nav');
+        const nav = document.getElementById('nav-more-list');
         if (nav && !nav.querySelector('[href="admin.html"]')) {
           nav.insertAdjacentHTML('beforeend', `<a href="admin.html"${page === 'admin.html' ? ' class="active" aria-current="page"' : ''}>Админ</a>`);
         }
       }
+      initNotifications();
       refreshUnread();
       setInterval(() => { if (!document.hidden) refreshUnread(); }, 60000);
       box.querySelector('#logout-btn').addEventListener('click', async () => {
@@ -129,6 +153,97 @@
     try { n = await (DB.chat || DB.dm).unread(); } catch { n = 0; }
     badge.textContent = n > 99 ? '99+' : String(n);
     badge.classList.toggle('hidden', !n);
+    const bell = document.getElementById('notif-badge');
+    if (bell && DB.notifs) {
+      let k = 0;
+      try { k = await DB.notifs.unread(); } catch { k = 0; }
+      bell.textContent = k > 99 ? '99+' : String(k);
+      bell.classList.toggle('hidden', !k);
+    }
+  }
+
+  /* колокольчик: список уведомлений открывается по нажатию и сразу отмечается прочитанным */
+  function initNotifications() {
+    const btn = document.getElementById('notif-btn');
+    const panel = document.getElementById('notif-panel');
+    if (!btn || !panel) return;
+    const close = () => { panel.classList.add('hidden'); btn.setAttribute('aria-expanded', 'false'); };
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!panel.classList.contains('hidden')) return close();
+      panel.classList.remove('hidden');
+      btn.setAttribute('aria-expanded', 'true');
+      panel.innerHTML = '<h3>Уведомления</h3><p class="notif-empty">Загрузка…</p>';
+      try {
+        const list = await DB.notifs.list();
+        panel.innerHTML = '<h3>Уведомления</h3>' + (list.length ? list.map((n) => {
+          const inner = `${esc(n.body)}<time>${esc(formatDate(n.created_at))}</time>`;
+          const cls = `notif-item${n.read_at ? '' : ' unread'}`;
+          return n.link ? `<a class="${cls}" href="${esc(n.link)}">${inner}</a>` : `<div class="${cls}">${inner}</div>`;
+        }).join('') : '<p class="notif-empty">Пока ничего нового. Здесь появятся ответы на ваши темы, лайки и решения по вашим фото, рецептам и товарам.</p>');
+        if (list.some((n) => !n.read_at)) {
+          await DB.notifs.markRead();
+          document.getElementById('notif-badge').classList.add('hidden');
+        }
+      } catch (err) {
+        panel.innerHTML = `<h3>Уведомления</h3><p class="notif-empty">${esc(err.message)}</p>`;
+      }
+    });
+    document.addEventListener('click', (e) => { if (!panel.contains(e.target) && e.target !== btn) close(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  }
+
+  /* окно «Пожаловаться»: kind — post | reply | message | profile */
+  function reportDialog(kind, target) {
+    if (!window.DB) return;
+    const what = { post: 'тему', reply: 'ответ', message: 'сообщение', profile: 'профиль' }[kind] || 'это';
+    const dlg = document.createElement('dialog');
+    dlg.className = 'modal report-modal';
+    dlg.innerHTML = `
+      <form class="modal-body" method="dialog" novalidate>
+        <button class="icon-btn modal-close" type="button" data-close aria-label="Закрыть">✕</button>
+        <h2 style="font-size:1.3rem">Пожаловаться на ${what}</h2>
+        <p class="small muted">Жалобу увидят только администраторы. Автор не узнает, кто её отправил.</p>
+        <div class="field" style="margin:14px 0">
+          <label for="report-reason">Что не так</label>
+          <select class="select" id="report-reason">
+            <option>Оскорбления или травля</option><option>Спам или реклама</option>
+            <option>Опасные советы о здоровье</option><option>Непристойное содержание</option><option>Другое</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="report-note">Комментарий (необязательно)</label>
+          <input class="input" id="report-note" maxlength="200">
+        </div>
+        <p class="form-error" role="alert"></p>
+        <button class="btn btn-primary btn-block" type="submit">Отправить жалобу</button>
+      </form>`;
+    document.body.appendChild(dlg);
+    const close = () => { dlg.close(); dlg.remove(); };
+    dlg.addEventListener('click', (e) => { if (e.target === dlg || e.target.closest('[data-close]')) close(); });
+    dlg.addEventListener('cancel', () => dlg.remove());
+    dlg.querySelector('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = dlg.querySelector('button[type="submit"]');
+      btn.disabled = true;
+      const note = dlg.querySelector('#report-note').value.trim();
+      try {
+        await DB.report(kind, target, dlg.querySelector('#report-reason').value + (note ? ': ' + note : ''));
+        close();
+        toast('Жалоба отправлена. Спасибо, что помогаете следить за порядком');
+      } catch (error) {
+        dlg.querySelector('.form-error').textContent = error.message;
+        btn.disabled = false;
+      }
+    });
+    if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+  }
+
+  /* цветовая тема сайта: green (по умолчанию), ocean, berry, citrus, lavender */
+  function setAccent(name) {
+    const ok = (window.PALETTES || []).some(([id]) => id === name) && name !== 'green';
+    if (ok) document.documentElement.dataset.accent = name; else delete document.documentElement.dataset.accent;
+    DB.store.set('accent', ok ? name : 'green');
   }
 
   /* нажатие на аватарку с фото открывает её крупно */
@@ -183,6 +298,7 @@
           <h4>Юридическая информация</h4>
           <p>ИНН: ________</p>
           <p>ОГРН: ________</p>
+          <p><a href="privacy.html">Политика конфиденциальности</a></p>
           <p class="footer-copy">© ${new Date().getFullYear()} ВкусЗдоровья<br>Все права защищены</p>
         </div>
       </div>`;
@@ -367,7 +483,8 @@
 
   window.UI = {
     esc, toast, formatDate, userReady, avatarHtml, refreshUnread,
-    setTheme,
+    setTheme, setAccent, reportDialog,
+    accent: () => DB.store.get('accent') || 'green',
     theme: () => DB.store.get('theme') || 'system',
     install, canInstall: () => Boolean(installEvent), isStandalone, isIOS,
     notify, scheduleReminder, reminderDefaults: REMINDER_DEFAULTS,

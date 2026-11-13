@@ -47,7 +47,11 @@
           <button type="button" data-meal="snack">Перекусы</button>
         </div>
       </div>
-      <div class="chips" id="r-tags" style="margin:0 0 28px" aria-label="Особенности"></div>
+      <div class="recipe-bar">
+        <div class="chips" id="r-tags" aria-label="Особенности"></div>
+        <button class="btn btn-lime btn-sm" type="button" id="r-add">➕ Предложить рецепт</button>
+      </div>
+      <p class="form-note hidden" id="r-prefs-note"></p>
       <div class="recipes" id="recipes" aria-live="polite"></div>
     </section>
   </main>
@@ -55,6 +59,45 @@
   <dialog class="modal" id="recipe-modal" aria-labelledby="rm-title">
     <button class="icon-btn modal-close" type="button" data-close aria-label="Закрыть">✕</button>
     <div class="modal-body recipe-detail" id="recipe-detail"></div>
+  </dialog>
+
+  <dialog class="modal" id="recipe-form-modal" aria-labelledby="rf-title">
+    <form class="modal-body" id="recipe-form" method="dialog" novalidate>
+      <button class="icon-btn modal-close" type="button" data-close aria-label="Закрыть">✕</button>
+      <h2 id="rf-title" style="font-size:1.4rem">Предложить рецепт</h2>
+      <p class="small muted">После проверки администратором рецепт появится в каталоге с вашим ником.</p>
+      <div class="form-grid rf-grid">
+        <div class="field" style="grid-column:1/-1"><label for="rf-name">Название *</label><input class="input" id="rf-name" maxlength="100" required placeholder="Например: Овсяноблин с творогом"></div>
+        <div class="field"><label for="rf-meal">Приём пищи *</label>
+          <select class="select" id="rf-meal"><option value="breakfast">Завтрак</option><option value="lunch">Обед</option><option value="dinner">Ужин</option><option value="snack">Перекус</option></select></div>
+        <div class="field"><label for="rf-min">Время, мин *</label><input class="input" id="rf-min" type="number" min="1" max="600" inputmode="numeric" placeholder="15"></div>
+      </div>
+      <p class="small muted" style="margin:14px 0 6px">Пищевая ценность <b>одной порции</b>:</p>
+      <div class="form-grid rf-nutri">
+        <div class="field"><label for="rf-portion">Вес, г *</label><input class="input" id="rf-portion" type="number" min="10" max="3000" inputmode="decimal" placeholder="250"></div>
+        <div class="field"><label for="rf-kcal">Ккал *</label><input class="input" id="rf-kcal" type="number" min="0" max="5000" inputmode="decimal"></div>
+        <div class="field"><label for="rf-p">Белки, г *</label><input class="input" id="rf-p" type="number" min="0" max="500" step="0.1" inputmode="decimal"></div>
+        <div class="field"><label for="rf-f">Жиры, г *</label><input class="input" id="rf-f" type="number" min="0" max="500" step="0.1" inputmode="decimal"></div>
+        <div class="field"><label for="rf-c">Углеводы, г *</label><input class="input" id="rf-c" type="number" min="0" max="500" step="0.1" inputmode="decimal"></div>
+      </div>
+      <div class="field" style="margin-top:14px"><label for="rf-ingr">Ингредиенты * <span class="small muted">— каждый с новой строки</span></label>
+        <textarea class="textarea" id="rf-ingr" maxlength="2000" style="min-height:90px" placeholder="Овсяные хлопья — 40 г&#10;Яйцо — 1 шт"></textarea></div>
+      <div class="field" style="margin-top:14px"><label for="rf-steps">Приготовление * <span class="small muted">— каждый шаг с новой строки</span></label>
+        <textarea class="textarea" id="rf-steps" maxlength="4000" style="min-height:110px"></textarea></div>
+      <div class="chips" style="margin-top:12px" role="group" aria-label="Особенности рецепта">
+        <label class="check"><input type="checkbox" value="veg" name="rf-tag"> Вегетарианское</label>
+        <label class="check"><input type="checkbox" value="vegan" name="rf-tag"> Веганское</label>
+        <label class="check"><input type="checkbox" value="gf" name="rf-tag"> Без глютена</label>
+        <label class="check"><input type="checkbox" value="lf" name="rf-tag"> Без лактозы</label>
+      </div>
+      <div class="inline-form" style="margin-top:14px;align-items:center">
+        <label class="btn btn-ghost btn-sm" for="rf-photo" style="cursor:pointer">📷 Фото блюда</label>
+        <input type="file" id="rf-photo" accept="image/jpeg,image/png,image/webp" class="sr-only">
+        <span class="small muted" id="rf-photo-name">по желанию</span>
+      </div>
+      <p class="form-error" role="alert"></p>
+      <button class="btn btn-primary btn-block" type="submit">Отправить на проверку</button>
+    </form>
   </dialog>
 
   <footer id="site-footer"></footer>

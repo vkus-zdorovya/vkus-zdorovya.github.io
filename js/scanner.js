@@ -319,6 +319,23 @@
     [/instant-noodles|noodles/, 'noodles'],
   ];
 
+  /* предупреждение по предпочтениям из Кабинета: аллергии и тип питания */
+  let avoid = [];
+  UI.userReady.then((user) => { avoid = DB.prefs.clean(user ? user.prefs : DB.store.get('prefs')).avoid; });
+
+  function prefsBlock(p) {
+    if (!avoid.length) return '';
+    const { hits, known } = window.productConflicts(p, avoid);
+    const names = avoid.map((k) => window.AVOID[k].label.toLowerCase()).join(', ');
+    const careful = ' Данные в базе бывают неполными — при аллергии обязательно прочитайте состав на упаковке.';
+    if (hits.length) {
+      return `<div class="verdict bad prefs-warn">🚫 <b>Не подходит вам.</b> ${hits.map((h) =>
+        `Содержит ${esc(window.AVOID[h.key].short)}${h.sure ? '' : ' (нашли в составе)'} — у вас отмечено «${esc(window.AVOID[h.key].label.toLowerCase())}».`).join(' ')}${careful}</div>`;
+    }
+    if (!known) return `<div class="verdict mid prefs-warn">❓ Не можем проверить на ваши предпочтения (${esc(names)}): в базе нет состава этого товара. Прочитайте его на упаковке.</div>`;
+    return `<div class="verdict good prefs-warn">✓ В составе не нашли того, что вы исключили (${esc(names)}).${careful}</div>`;
+  }
+
   function renderProduct(code, p, source) {
     const n = p.nutriments || {};
     const num = (key) => (n[key + '_100g'] != null && n[key + '_100g'] !== '' ? Number(n[key + '_100g']) : null);
@@ -386,6 +403,7 @@
         </div>
 
         <div class="verdict ${verdict[0]}">${verdict[1]}</div>
+        ${prefsBlock(p)}
 
         ${lights.length ? `<h3>На ${unit}</h3><div class="lights">${lights.map((l) => `
           <div class="light"><i style="background:${LIGHT_COLORS[l.level]}"></i><span>${LIGHT_NAMES[l.key]} — ${LIGHT_TEXT[l.level]}</span><b>${fmt(l.v)} г</b></div>`).join('')}</div>` : ''}

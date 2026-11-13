@@ -19,6 +19,7 @@
   <script defer src="js/data.js"></script>
   <script defer src="js/main.js"></script>
   <script defer src="js/account.js"></script>
+  <script defer src="js/account-plus.js"></script>
 </head>
 <body>
   <header id="site-header"></header>
@@ -33,6 +34,39 @@
     <section class="container" style="padding-bottom:64px">
       <div class="account-grid">
         <div class="card wide" id="profile"><p class="muted">Загрузка…</p></div>
+
+        <div class="card wide" id="week-card">
+          <h2 style="font-size:1.5rem">Отчёт за неделю</h2>
+          <div id="week-report"><p class="muted">Загрузка…</p></div>
+        </div>
+
+        <div class="card" id="prefs-card">
+          <h2 style="font-size:1.5rem">Мои предпочтения</h2>
+          <p class="small muted">Отметьте, что вам не подходит. Сканер предупредит о таких продуктах, а рецепты и рацион подстроятся.</p>
+          <div class="pref-list" id="prefs" role="group" aria-label="Предпочтения в питании"></div>
+          <p class="small muted">Проверка идёт по составу из базы и может быть неполной. При аллергии всегда читайте состав на упаковке.</p>
+        </div>
+
+        <div class="card" id="goal-card">
+          <h2 style="font-size:1.5rem">Моя цель</h2>
+          <form class="inline-form" id="goal-form" novalidate>
+            <div class="field">
+              <label for="goal-weight">Желаемый вес, кг</label>
+              <input class="input" type="number" id="goal-weight" inputmode="decimal" min="30" max="300" step="0.1" placeholder="65">
+            </div>
+            <div class="field">
+              <label for="goal-date">К какой дате</label>
+              <input class="input" type="date" id="goal-date">
+            </div>
+            <button class="btn btn-primary" type="submit">Рассчитать</button>
+          </form>
+          <div id="goal-result" aria-live="polite"></div>
+        </div>
+
+        <div class="card wide" id="badges-card">
+          <h2 style="font-size:1.5rem">Достижения</h2>
+          <div id="badges"><p class="muted">Загрузка…</p></div>
+        </div>
 
         <div class="card wide">
           <h2 style="font-size:1.5rem">Дневник веса</h2>
@@ -70,6 +104,11 @@
               <option value="light">Светлая</option>
               <option value="dark">Тёмная</option>
             </select>
+          </div>
+
+          <div class="setting" style="flex-wrap:wrap">
+            <b id="palette-label">Цвет сайта</b>
+            <div class="palette" id="palette" role="group" aria-labelledby="palette-label"></div>
           </div>
 
           <div class="setting">

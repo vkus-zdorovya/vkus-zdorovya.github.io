@@ -307,3 +307,101 @@ window.DEFAULT_BANNED_WORDS = [
   'сука', 'суки', 'сучк*', 'мудак*', 'мудил*', 'пидор*', 'пидар*', 'гандон*', 'шлюх*',
   'даун', 'дауны', 'дебил*', 'идиот*', 'урод', 'уроды', 'уродина', 'тварь', 'твари',
 ];
+
+/* ===================== Предпочтения в питании и аллергии ===================== */
+
+/* продукты справочника с орехами, яйцами, рыбой и соей (остальные группы — в FOOD_FLAGS выше) */
+Object.assign(window.FOOD_FLAGS, {
+  nuts: ['walnut', 'almond', 'pbutter'],
+  eggs: ['egg', 'syrniki'],
+  fish: ['salmon', 'cod'],
+  soy: [],
+});
+
+/*
+ * Что можно отметить в профиле. flag — группа продуктов из FOOD_FLAGS,
+ * off — метки аллергенов Open Food Facts, words — слова в составе на упаковке.
+ */
+window.AVOID = {
+  veg: { label: 'Вегетарианство', short: 'мясо или рыбу', icon: '🥕', flag: 'meat', off: ['en:fish', 'en:crustaceans', 'en:molluscs'], analysis: ['en:non-vegetarian'],
+    words: ['мясо', 'говядин', 'свинин', 'курин', 'курица', 'индейк', 'бекон', 'ветчин', 'желатин', 'рыб', 'лосос', 'тунец', 'сельд', 'кревет', 'meat', 'beef', 'pork', 'chicken', 'gelatin', 'fish'] },
+  vegan: { label: 'Веганство', short: 'продукты животного происхождения', icon: '🌱', flag: 'animal', off: ['en:milk', 'en:eggs', 'en:fish', 'en:crustaceans', 'en:molluscs'], analysis: ['en:non-vegan'],
+    words: ['молок', 'молоч', 'сливк', 'сливоч', 'сыворот', 'творог', 'сыр ', 'сыр,', 'яйц', 'яичн', 'мёд', 'мед,', 'мед ', 'мясо', 'желатин', 'рыб', 'milk', 'egg', 'honey', 'butter', 'whey', 'gelatin'] },
+  gf: { label: 'Без глютена', short: 'глютен', icon: '🌾', flag: 'gluten', off: ['en:gluten'], analysis: [],
+    words: ['глютен', 'пшени', 'рожь', 'ржан', 'ячмен', 'ячмён', 'овёс', 'овес', 'овсян', 'манн', 'полба', 'солод', 'wheat', 'gluten', 'barley', 'rye', 'oat', 'malt'] },
+  lf: { label: 'Без лактозы', short: 'молоко', icon: '🥛', flag: 'dairy', off: ['en:milk'], analysis: [],
+    words: ['молок', 'молоч', 'сливк', 'сливоч', 'сыворот', 'лактоз', 'творог', 'сметан', 'кефир', 'йогурт', 'milk', 'lactose', 'whey', 'cream', 'butter'] },
+  nuts: { label: 'Аллергия на орехи и арахис', short: 'орехи или арахис', icon: '🥜', flag: 'nuts', off: ['en:nuts', 'en:peanuts'], analysis: [],
+    words: ['орех', 'арахис', 'миндал', 'фундук', 'кешью', 'фисташ', 'пекан', 'пралине', 'nut', 'almond', 'hazelnut', 'cashew', 'pistachio'] },
+  eggs: { label: 'Аллергия на яйца', short: 'яйца', icon: '🥚', flag: 'eggs', off: ['en:eggs'], analysis: [],
+    words: ['яйц', 'яичн', 'меланж', 'альбумин', 'egg'] },
+  fish: { label: 'Аллергия на рыбу и морепродукты', short: 'рыбу или морепродукты', icon: '🐟', flag: 'fish', off: ['en:fish', 'en:crustaceans', 'en:molluscs'], analysis: [],
+    words: ['рыб', 'лосос', 'тунец', 'треск', 'сельд', 'анчоус', 'кревет', 'краб', 'кальмар', 'мидии', 'fish', 'salmon', 'tuna', 'shrimp', 'crab'] },
+  soy: { label: 'Аллергия на сою', short: 'сою', icon: '🫘', flag: 'soy', off: ['en:soybeans'], analysis: [],
+    words: ['соя', 'сои', 'соев', 'soy'] },
+};
+
+/* какие ограничения нарушает продукт справочника: [ключи AVOID] */
+window.foodConflicts = function (foodId, avoid) {
+  return (avoid || []).filter((key) => window.AVOID[key] && (window.FOOD_FLAGS[window.AVOID[key].flag] || []).includes(foodId));
+};
+
+/* то же для рецепта из каталога (по его составу) и рецепта участника (по его меткам: проверить можно только диету) */
+window.recipeConflicts = function (recipe, avoid) {
+  if (recipe.items) return (avoid || []).filter((key) => recipe.items.some(([id]) => window.foodConflicts(id, [key]).length));
+  const tags = recipe.tags || [];
+  return (avoid || []).filter((key) => ['veg', 'vegan', 'gf', 'lf'].includes(key) && !tags.includes(key));
+};
+
+/*
+ * Проверка отсканированного товара. Возвращает { hits: [{ key, sure }], known }:
+ * sure = true — аллерген указан производителем в базе, false — найден по словам в составе;
+ * known = false — в карточке нет ни состава, ни аллергенов, проверить нечем.
+ */
+window.productConflicts = function (p, avoid) {
+  const tags = [...(p.allergens_tags || []), ...(p.traces_tags || [])];
+  const analysis = p.ingredients_analysis_tags || [];
+  const text = ' ' + String(p.ingredients_text_ru || p.ingredients_text || '').toLowerCase().replace(/ё/g, 'е') + ' ';
+  const known = Boolean(tags.length || analysis.length || text.trim());
+  const hits = [];
+  (avoid || []).forEach((key) => {
+    const rule = window.AVOID[key];
+    if (!rule) return;
+    if (rule.off.some((t) => tags.includes(t)) || rule.analysis.some((t) => analysis.includes(t))) hits.push({ key, sure: true });
+    else if (text.trim() && rule.words.some((w) => text.includes(w.replace(/ё/g, 'е')))) hits.push({ key, sure: false });
+  });
+  return { hits, known };
+};
+
+/* ===================== Активность: расход калорий ===================== */
+/* MET — во сколько раз расход энергии выше, чем в покое. Ккал = MET × вес (кг) × часы. */
+window.ACTIVITIES = [
+  ['walk', '🚶 Ходьба спокойная', 3.3], ['walk-fast', '🚶‍♀️ Ходьба быстрая', 4.5], ['run', '🏃 Бег трусцой', 7], ['run-fast', '🏃‍♂️ Бег быстрый', 9.8],
+  ['bike', '🚴 Велосипед', 6.8], ['swim', '🏊 Плавание', 6], ['gym', '🏋️ Силовая тренировка', 5], ['fitness', '🤸 Фитнес, аэробика', 6.5],
+  ['yoga', '🧘 Йога, растяжка', 2.8], ['dance', '💃 Танцы', 5], ['football', '⚽ Футбол', 7], ['basketball', '🏀 Баскетбол', 6.5],
+  ['ski', '⛷ Лыжи', 7], ['skate', '⛸ Коньки', 5.5], ['house', '🧹 Уборка', 3.3], ['stairs', '🪜 Подъём по лестнице', 8],
+];
+
+/* ===================== Достижения ===================== */
+/* test получает счётчики из DB.stats(); goal и key нужны для полоски прогресса */
+window.BADGES = [
+  { id: 'start', icon: '🌱', title: 'Начало пути', desc: 'Зарегистрировался на сайте', key: 'days_member', goal: 0 },
+  { id: 'diary1', icon: '📔', title: 'Первая запись', desc: 'Записал приём пищи в дневник', key: 'diary_days', goal: 1 },
+  { id: 'streak7', icon: '🔥', title: 'Неделя подряд', desc: 'Вёл дневник 7 дней без пропусков', key: 'best_streak', goal: 7 },
+  { id: 'streak30', icon: '🏅', title: 'Месяц подряд', desc: 'Вёл дневник 30 дней без пропусков', key: 'best_streak', goal: 30 },
+  { id: 'weight5', icon: '⚖️', title: 'Слежу за весом', desc: 'Отметил вес 5 раз', key: 'weights', goal: 5 },
+  { id: 'active5', icon: '🏃', title: 'В движении', desc: 'Записал 5 тренировок', key: 'activities', goal: 5 },
+  { id: 'post1', icon: '💬', title: 'Первая тема', desc: 'Создал тему на форуме', key: 'posts', goal: 1 },
+  { id: 'reply10', icon: '🗣', title: 'Собеседник', desc: 'Оставил 10 ответов на форуме', key: 'replies', goal: 10 },
+  { id: 'likes5', icon: '❤️', title: 'Полезный автор', desc: 'Получил 5 лайков на свои темы', key: 'likes', goal: 5 },
+  { id: 'product1', icon: '📦', title: 'Помощник сканера', desc: 'Добавил товар в базу', key: 'products', goal: 1 },
+  { id: 'recipe1', icon: '👨‍🍳', title: 'Шеф', desc: 'Опубликовал свой рецепт', key: 'recipes', goal: 1 },
+  { id: 'chal1', icon: '🎯', title: 'Челленджер', desc: 'Прошёл челлендж до конца', key: 'challenges', goal: 1 },
+  { id: 'chal3', icon: '🏆', title: 'Чемпион', desc: 'Прошёл 3 челленджа', key: 'challenges', goal: 3 },
+];
+
+/* ===================== Цветовые темы ===================== */
+window.PALETTES = [
+  ['green', 'Зелёное яблоко', '#306b30'], ['ocean', 'Океан', '#1f6f8b'], ['berry', 'Ягодная', '#a03a68'],
+  ['citrus', 'Цитрус', '#b85c14'], ['lavender', 'Лаванда', '#5b4bb0'],
+];

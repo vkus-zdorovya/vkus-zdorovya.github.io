@@ -33,12 +33,21 @@
   const canDelete = (item) => user && (user.id === item.author_id || user.role === 'admin');
   let user = null;
   const open = new Set();
+  let hashDone = false;
 
   async function load() {
     try {
       posts = await DB.forum.list();
       Object.assign(authors, await DB.publicProfiles(posts.map((p) => p.author_id)));
+      // ссылка из уведомления вида forum.html#post-12 сразу раскрывает тему
+      const linked = /^#post-(.+)$/.exec(location.hash);
+      if (linked && !hashDone) open.add(linked[1]);
       render();
+      if (linked && !hashDone) {
+        hashDone = true;
+        const el = document.getElementById(`post-${linked[1]}`);
+        if (el) { el.scrollIntoView({ block: 'start', behavior: 'smooth' }); el.classList.add('flash'); }
+      }
     } catch (err) {
       postsEl.innerHTML = `<p class="form-error">${esc(err.message)}</p>`;
     }
@@ -56,7 +65,7 @@
       return;
     }
     postsEl.innerHTML = list.map((p) => `
-      <article class="card post${p.pinned ? ' pinned' : ''}" data-id="${p.id}">
+      <article class="card post${p.pinned ? ' pinned' : ''}" data-id="${p.id}" id="post-${p.id}">
         <div class="post-head">
           ${author(p)}
           <div class="post-tags">${p.pinned ? '<span class="badge badge-pin">📌 Закреплено</span>' : ''}<span class="badge">${esc(p.topic || 'Общее')}</span></div>
@@ -66,8 +75,10 @@
         ${isLong(p.body) ? '<button class="link-btn" type="button" data-expand>Показать полностью</button>' : ''}
         <div class="post-foot">
           <button class="btn btn-ghost btn-sm" type="button" data-toggle>💬 Ответы (${p.replies_count})</button>
+          ${p.can_like ? `<button class="btn btn-ghost btn-sm like-btn${p.liked ? ' on' : ''}" type="button" data-like aria-pressed="${Boolean(p.liked)}" aria-label="Нравится: ${p.likes}">♥ ${p.likes}</button>` : ''}
           ${isAdmin() ? `<button class="btn btn-ghost btn-sm" type="button" data-pin>${p.pinned ? 'Открепить' : '📌 Закрепить'}</button>` : ''}
           ${canDelete(p) ? '<button class="btn btn-danger btn-sm" type="button" data-delete>Удалить</button>' : ''}
+          ${user && user.id !== p.author_id ? '<button class="link-btn report-link" type="button" data-report-post>🚩 Пожаловаться</button>' : ''}
         </div>
         <div class="replies hidden"></div>
       </article>`).join('');
@@ -92,6 +103,7 @@
           <div class="reply-actions">
             ${isAdmin() ? `<button class="link-btn" type="button" data-pin-reply="${r.id}">${r.pinned ? 'Открепить' : '📌 Закрепить'}</button>` : ''}
             ${canDelete(r) ? `<button class="link-btn danger" type="button" data-del-reply="${r.id}">Удалить ответ</button>` : ''}
+            ${user && user.id !== r.author_id ? `<button class="link-btn report-link" type="button" data-report-reply="${r.id}">🚩 Пожаловаться</button>` : ''}
           </div>
         </div>`).join('') + (user && !isMuted()
         ? `<form class="reply-form" novalidate>
@@ -126,6 +138,20 @@
       body.classList.toggle('clamped');
       expand.textContent = body.classList.contains('clamped') ? 'Показать полностью' : 'Свернуть';
     }
+    if (e.target.closest('[data-like]')) {
+      if (!user) { toast('Войдите, чтобы оценивать темы', 'error'); return; }
+      const post = posts.find((x) => String(x.id) === card.dataset.id);
+      try {
+        await DB.forum.like(post.id, !post.liked);
+        post.liked = !post.liked;
+        post.likes += post.liked ? 1 : -1;
+        render();
+      } catch (err) { toast(err.message, 'error'); }
+      return;
+    }
+    if (e.target.closest('[data-report-post]')) { UI.reportDialog('post', card.dataset.id); return; }
+    const repReply = e.target.closest('[data-report-reply]');
+    if (repReply) { UI.reportDialog('reply', repReply.dataset.reportReply); return; }
     const pinReply = e.target.closest('[data-pin-reply]');
     if (pinReply) {
       const r = (card.replyList || []).find((x) => String(x.id) === pinReply.dataset.pinReply);

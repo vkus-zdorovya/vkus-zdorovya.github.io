@@ -117,6 +117,20 @@
 
   const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
+  /* уведомление в демо-режиме (в базе это делают триггеры) */
+  function localNotify(userId, kind, body, link) {
+    if (!userId) return;
+    const all = store.get('notifs', []);
+    all.push({ id: newId(), user_id: userId, kind, body, link: link || null, created_at: new Date().toISOString(), read_at: null });
+    store.set('notifs', all.slice(-200));
+  }
+
+  const blobToDataUrl = (blob) => new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.readAsDataURL(blob);
+  });
+
   function validateCredentials({ email, password }) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || '')) throw new Error('Некорректный адрес почты');
     if (!password || password.length < 6) throw new Error('Пароль слишком короткий — минимум 6 символов');
@@ -177,6 +191,7 @@
           banner_pending_url: avatarUrl(profile && profile.banner_pending),
           muted_until: (profile && profile.muted_until) || null,
           mute_reason: (profile && profile.mute_reason) || null,
+          prefs: (profile && profile.prefs) || {},
         };
       },
       async updatePlan(plan) {
@@ -219,20 +234,32 @@
 
     forum: {
       async list(authorId) {
-        const query = (withPin) => {
+        // level 2 — с лайками и закреплением, 1 — только закрепление, 0 — базовая схема
+        const query = (level) => {
           let q = sb.from('forum_posts')
-            .select(`id, title, body, topic, author_id, author_name, created_at, ${withPin ? 'pinned, ' : ''}forum_replies(count)`);
+            .select(`id, title, body, topic, author_id, author_name, created_at, ${level >= 1 ? 'pinned, ' : ''}forum_replies(count)${level >= 2 ? ', forum_likes(count)' : ''}`);
           if (authorId) q = q.eq('author_id', authorId);
-          if (withPin) q = q.order('pinned', { ascending: false });
+          if (level >= 1) q = q.order('pinned', { ascending: false });
           return q.order('created_at', { ascending: false }).limit(200);
         };
         let rows;
-        try {
-          rows = await run(query(true));
-        } catch {
-          rows = await run(query(false)); // schema-5 ещё не выполнен
+        let level = 2;
+        for (; level >= 0; level -= 1) {
+          try { rows = await run(query(level)); break; } catch (e) { if (level === 0) throw e; }
         }
-        return rows.map((r) => ({ ...r, replies_count: (r.forum_replies && r.forum_replies[0] && r.forum_replies[0].count) || 0 }));
+        let mine = new Set();
+        const uid = level >= 2 ? await remoteUserId() : null;
+        if (uid) {
+          try {
+            mine = new Set((await run(sb.from('forum_likes').select('post_id').eq('user_id', uid))).map((r) => r.post_id));
+          } catch { /* лайки ещё не подключены */ }
+        }
+        const count = (x) => (x && x[0] && x[0].count) || 0;
+        return rows.map((r) => ({ ...r, replies_count: count(r.forum_replies), likes: count(r.forum_likes), liked: mine.has(r.id), can_like: level >= 2 }));
+      },
+      async like(postId, on) {
+        if (on) await run(sb.from('forum_likes').insert({ post_id: postId }));
+        else await run(sb.from('forum_likes').delete().eq('post_id', postId).eq('user_id', await remoteUserId()));
       },
       async create({ title, body, topic }) {
         return run(sb.from('forum_posts').insert({ title, body, topic }).select().single());
@@ -322,6 +349,7 @@
           banner_url: user.banner_url || null, banner_pending: Boolean(user.banner_pending),
           avatar_pending_url: user.avatar_pending || null, banner_pending_url: user.banner_pending || null,
           muted_until: user.muted_until || null, mute_reason: user.mute_reason || null,
+          prefs: user.prefs || {},
         } : null;
       },
       async updatePlan(plan) {
@@ -368,7 +396,11 @@
         const replies = store.get('forum_replies', []);
         return store.get('forum_posts', [])
           .filter((p) => !authorId || p.author_id === authorId)
-          .map((p) => ({ ...p, replies_count: replies.filter((r) => r.post_id === p.id).length }))
+          .map((p) => ({
+            ...p, replies_count: replies.filter((r) => r.post_id === p.id).length, can_like: true,
+            likes: store.get('forum_likes', []).filter((l) => l.post_id === p.id).length,
+            liked: store.get('forum_likes', []).some((l) => l.post_id === p.id && l.user_id === (store.get('users', {})[store.get('session')] || {}).id),
+          }))
           .sort((a, b) => (Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))) || b.created_at.localeCompare(a.created_at));
       },
       async create({ title, body, topic }) {
@@ -380,6 +412,17 @@
         posts.push(row);
         store.set('forum_posts', posts);
         return row;
+      },
+      async like(postId, on) {
+        const user = await local.auth.getUser();
+        if (!user) throw new Error('Сначала войдите в аккаунт');
+        const rest = store.get('forum_likes', []).filter((l) => !(l.post_id === postId && l.user_id === user.id));
+        if (on) {
+          rest.push({ post_id: postId, user_id: user.id });
+          const post = store.get('forum_posts', []).find((x) => x.id === postId);
+          if (post && post.author_id !== user.id) localNotify(post.author_id, 'like', `${user.name} оценил(а) вашу тему «${post.title}»`, `forum.html#post-${postId}`);
+        }
+        store.set('forum_likes', rest);
       },
       async remove(id) {
         store.set('forum_posts', store.get('forum_posts', []).filter((p) => p.id !== id));
@@ -399,6 +442,8 @@
         const row = { id: newId(), post_id: postId, body, author_id: user.id, author_name: user.name, created_at: new Date().toISOString() };
         all.push(row);
         store.set('forum_replies', all);
+        const post = store.get('forum_posts', []).find((x) => x.id === postId);
+        if (post && post.author_id !== user.id) localNotify(post.author_id, 'reply', `${user.name} ответил(а) в теме «${post.title}»`, `forum.html#post-${postId}`);
         return row;
       },
     },
@@ -497,22 +542,78 @@
   };
 
   const DIARY_FIELDS = 'id, date, meal, name, grams, kcal, protein, fat, carbs';
+  let diaryPhotos = true; // false — в базе ещё нет колонки с фото (schema-10 не выполнен)
   const diary = {
     /* записи за период [from; to], даты в формате ГГГГ-ММ-ДД */
     async list(from, to = from) {
       if (await remoteUserId()) {
-        return run(sb.from('food_diary').select(DIARY_FIELDS).gte('date', from).lte('date', to).order('created_at'));
+        const query = (fields) => sb.from('food_diary').select(fields).gte('date', from).lte('date', to).order('created_at');
+        if (diaryPhotos) {
+          try { return await run(query(DIARY_FIELDS + ', photo_path')); } catch { diaryPhotos = false; }
+        }
+        return run(query(DIARY_FIELDS));
       }
       return (await localDiary.rows()).filter((r) => r.date >= from && r.date <= to);
     },
+    /* запись может нести photo (Blob) — фото блюда */
     async add(entries) {
       const list = Array.isArray(entries) ? entries : [entries];
-      if (await remoteUserId()) return run(sb.from('food_diary').insert(list));
-      for (const e of list) await localDiary.insert(e);
+      const uid = await remoteUserId();
+      if (uid) {
+        const rows = [];
+        for (const { photo, ...row } of list) {
+          if (photo && diaryPhotos) {
+            const path = `${uid}/${newId()}.jpg`;
+            await run(sb.storage.from('diary').upload(path, photo, { contentType: 'image/jpeg', upsert: false }));
+            row.photo_path = path;
+          }
+          rows.push(row);
+        }
+        return run(sb.from('food_diary').insert(rows));
+      }
+      for (const { photo, ...row } of list) {
+        if (photo) row.photo_url = await blobToDataUrl(photo);
+        await localDiary.insert(row);
+      }
     },
     async remove(id) {
-      if (await remoteUserId()) return run(sb.from('food_diary').delete().eq('id', id));
+      if (await remoteUserId()) {
+        if (diaryPhotos) {
+          try {
+            const row = await run(sb.from('food_diary').select('photo_path').eq('id', id).maybeSingle());
+            if (row && row.photo_path) await sb.storage.from('diary').remove([row.photo_path]);
+          } catch { /* фото удалить не удалось — запись всё равно удаляем */ }
+        }
+        return run(sb.from('food_diary').delete().eq('id', id));
+      }
       return localDiary.remove(id);
+    },
+    /* фото закрытые: временные ссылки на час */
+    async photoUrls(paths) {
+      if (!paths.length || !useSupabase) return {};
+      const { data, error } = await sb.storage.from('diary').createSignedUrls(paths, 3600);
+      if (error) return {};
+      return Object.fromEntries((data || []).filter((x) => x.signedUrl).map((x) => [x.path, x.signedUrl]));
+    },
+    canPhoto: () => diaryPhotos,
+  };
+
+  /* тренировки и другая активность: расход калорий по дням */
+  const localActivity = localTable('activity');
+  const activity = {
+    async list(from, to = from) {
+      if (await remoteUserId()) {
+        return run(sb.from('activity_log').select('id, date, name, minutes, kcal').gte('date', from).lte('date', to).order('created_at'));
+      }
+      return (await localActivity.rows()).filter((r) => r.date >= from && r.date <= to);
+    },
+    async add(row) {
+      if (await remoteUserId()) return run(sb.from('activity_log').insert(row));
+      return localActivity.insert(row);
+    },
+    async remove(id) {
+      if (await remoteUserId()) return run(sb.from('activity_log').delete().eq('id', id));
+      return localActivity.remove(id);
     },
   };
 
@@ -889,7 +990,7 @@
 
   /* ===================== База продуктов для сканера ===================== */
 
-  const OFF_FIELDS = 'product_name,product_name_ru,brands,image_front_small_url,nutriments,nutriscore_grade,nova_group,additives_tags,ingredients_text_ru,ingredients_text,categories_tags,quantity';
+  const OFF_FIELDS = 'product_name,product_name_ru,brands,image_front_small_url,nutriments,nutriscore_grade,nova_group,additives_tags,ingredients_text_ru,ingredients_text,categories_tags,quantity,allergens_tags,traces_tags,ingredients_analysis_tags';
   const offBase = () => (window.APP_CONFIG && APP_CONFIG.useProxy ? location.origin + '/off' : 'https://world.openfoodfacts.org');
 
   /* запасной путь: прямой запрос к Open Food Facts (без VPN на мобильном может не работать) */
@@ -1199,6 +1300,406 @@
     },
   };
 
+
+  /* ===================== Часть 10: предпочтения, достижения, уведомления, рецепты, челленджи, жалобы ===================== */
+
+  const MISSING10 = 'Раздел ещё не подключён: выполните в Supabase файл schema-10-community.sql';
+  const need10 = (e) => (/schema cache|does not exist|could not find/i.test(e.message) ? new Error(MISSING10) : e);
+  const localUser = async () => {
+    const user = await local.auth.getUser();
+    if (!user) throw new Error('Сначала войдите в аккаунт');
+    return user;
+  };
+
+  /* ---------- предпочтения в питании и цель по весу ---------- */
+
+  function cleanPrefs(p) {
+    const known = window.AVOID || {};
+    const goal = p && p.goal && Number(p.goal.weight) > 0
+      ? { weight: Number(p.goal.weight), date: String(p.goal.date || ''), start: Number(p.goal.start) || null } : null;
+    return { avoid: Array.isArray(p && p.avoid) ? p.avoid.filter((k) => known[k]) : [], goal };
+  }
+  const prefs = {
+    clean: cleanPrefs,
+    /* гость хранит предпочтения в браузере, вошедший — в профиле */
+    async get() {
+      const user = await auth.getUser();
+      return cleanPrefs(user ? user.prefs : store.get('prefs'));
+    },
+    async set(next) {
+      const value = cleanPrefs(next);
+      const uid = await remoteUserId();
+      if (uid) {
+        try { await run(sb.from('profiles').update({ prefs: value }).eq('id', uid)); } catch (e) { throw need10(e); }
+        return value;
+      }
+      const key = store.get('session');
+      const users = store.get('users', {});
+      if (!useSupabase && key && users[key]) {
+        users[key].prefs = value;
+        store.set('users', users);
+      } else {
+        store.set('prefs', value);
+      }
+      return value;
+    },
+  };
+
+  /* ---------- счётчики для достижений ---------- */
+
+  function streaks(dates) {
+    const days = [...new Set(dates)].sort();
+    let best = 0;
+    let run_ = 0;
+    let prev = null;
+    let current = 0;
+    const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    days.forEach((d) => {
+      run_ = prev && (new Date(d) - new Date(prev)) / 864e5 === 1 ? run_ + 1 : 1;
+      best = Math.max(best, run_);
+      prev = d;
+    });
+    if (prev && (new Date(today) - new Date(prev)) / 864e5 <= 1) current = run_;
+    return { best, current };
+  }
+
+  async function stats(uid) {
+    if (useSupabase) {
+      try { return await run(sb.rpc('profile_stats', { uid })); } catch (e) { throw need10(e); }
+    }
+    const mine = (name) => store.get(name, []).filter((r) => r.owner === uid);
+    const st = streaks(mine('diary').map((r) => r.date));
+    const posts = store.get('forum_posts', []).filter((p) => p.author_id === uid);
+    const checkins = store.get('challenge_checkins', []).filter((c) => c.user_id === uid);
+    return {
+      diary_days: new Set(mine('diary').map((r) => r.date)).size, best_streak: st.best, streak: st.current,
+      weights: mine('weights').length, activities: mine('activity').length,
+      posts: posts.length, replies: store.get('forum_replies', []).filter((r) => r.author_id === uid).length,
+      likes: store.get('forum_likes', []).filter((l) => l.user_id !== uid && posts.some((p) => p.id === l.post_id)).length,
+      products: store.get('product_requests', []).filter((r) => r.user_id === uid && r.status === 'approved').length,
+      recipes: store.get('user_recipes', []).filter((r) => r.user_id === uid && r.status === 'approved').length,
+      checkins: checkins.length,
+      challenges: localChallengeRows().filter((c) => checkins.filter((k) => k.challenge_id === c.id).length >= c.days).length,
+      days_member: 0,
+    };
+  }
+
+  /* ---------- уведомления ---------- */
+
+  const remoteNotifs = {
+    async list() {
+      try {
+        return await run(sb.from('notifications').select('id, kind, body, link, created_at, read_at').order('created_at', { ascending: false }).limit(30));
+      } catch (e) { throw need10(e); }
+    },
+    async unread() {
+      try { return (await run(sb.rpc('notif_unread_count'))) || 0; } catch { return 0; }
+    },
+    async markRead() { await run(sb.rpc('notif_mark_read')); },
+  };
+  const localNotifs = {
+    async list() {
+      const user = await local.auth.getUser();
+      if (!user) return [];
+      return store.get('notifs', []).filter((n) => n.user_id === user.id).reverse().slice(0, 30);
+    },
+    async unread() { return (await localNotifs.list()).filter((n) => !n.read_at).length; },
+    async markRead() {
+      const user = await local.auth.getUser();
+      if (!user) return;
+      store.set('notifs', store.get('notifs', []).map((n) => (n.user_id === user.id && !n.read_at ? { ...n, read_at: new Date().toISOString() } : n)));
+    },
+  };
+
+  /* ---------- рецепты участников, избранное, оценки ---------- */
+
+  const remoteRecipes = {
+    /* одобренные рецепты всех участников и свои, которые ещё на проверке */
+    async listUser() {
+      let rows;
+      try {
+        rows = await run(sb.from('user_recipes').select('*').order('created_at', { ascending: false }).limit(200));
+      } catch { return []; } // раздел не подключён — каталог работает без рецептов участников
+      const uid = await remoteUserId();
+      rows = rows.filter((r) => r.status === 'approved' || r.user_id === uid);
+      const names = await publicProfiles(rows.map((r) => r.user_id));
+      return rows.map((r) => ({ ...r, photo_url: avatarUrl(r.photo_path), author_name: (names[r.user_id] && names[r.user_id].name) || 'Участник', mine: r.user_id === uid }));
+    },
+    async submit(fields, photo) {
+      const uid = await remoteUserId();
+      if (!uid) throw new Error('Сначала войдите в аккаунт');
+      let photoPath = null;
+      if (photo) {
+        photoPath = `${uid}/recipe-${newId()}.jpg`;
+        await run(sb.storage.from('avatars').upload(photoPath, photo, { contentType: 'image/jpeg', upsert: false }));
+      }
+      try {
+        return await run(sb.from('user_recipes').insert({ ...fields, photo_path: photoPath }).select('id, status').single());
+      } catch (e) { throw need10(e); }
+    },
+    async remove(id) { await run(sb.from('user_recipes').delete().eq('id', id)); },
+    async favorites() {
+      if (!(await remoteUserId())) return store.get('fav_recipes', []);
+      try { return (await run(sb.from('recipe_favorites').select('recipe_key'))).map((r) => r.recipe_key); } catch { return store.get('fav_recipes', []); }
+    },
+    async setFavorite(key, on) {
+      const uid = await remoteUserId();
+      if (!uid) {
+        const rest = store.get('fav_recipes', []).filter((k) => k !== key);
+        store.set('fav_recipes', on ? [...rest, key] : rest);
+        return;
+      }
+      try {
+        if (on) await run(sb.from('recipe_favorites').upsert({ recipe_key: key }, { onConflict: 'user_id,recipe_key' }));
+        else await run(sb.from('recipe_favorites').delete().eq('recipe_key', key).eq('user_id', uid));
+      } catch (e) { throw need10(e); }
+    },
+    async stats() {
+      try {
+        return Object.fromEntries((await run(sb.rpc('recipe_stats'))).map((r) => [r.recipe_key, { rating: Number(r.rating), votes: r.votes }]));
+      } catch { return {}; }
+    },
+    async myRatings() {
+      if (!(await remoteUserId())) return {};
+      try { return Object.fromEntries((await run(sb.from('recipe_ratings').select('recipe_key, stars'))).map((r) => [r.recipe_key, r.stars])); } catch { return {}; }
+    },
+    async rate(key, stars) {
+      if (!(await remoteUserId())) throw new Error('Войдите в аккаунт, чтобы оценивать рецепты');
+      try { await run(sb.from('recipe_ratings').upsert({ recipe_key: key, stars }, { onConflict: 'user_id,recipe_key' })); } catch (e) { throw need10(e); }
+    },
+  };
+
+  const localRecipes = {
+    async listUser() {
+      const user = await local.auth.getUser();
+      return store.get('user_recipes', []).filter((r) => r.status === 'approved' || (user && r.user_id === user.id))
+        .map((r) => ({ ...r, mine: Boolean(user && r.user_id === user.id) })).reverse();
+    },
+    async submit(fields, photo) {
+      const user = await localUser();
+      localGuard(user, [fields.title, fields.ingredients, fields.steps].join(' '));
+      const row = {
+        ...fields, id: newId(), user_id: user.id, author_name: user.name, author_email: user.email,
+        photo_url: photo ? await blobToDataUrl(photo) : null, status: user.role === 'admin' ? 'approved' : 'pending', created_at: new Date().toISOString(),
+      };
+      store.set('user_recipes', [...store.get('user_recipes', []), row]);
+      return { id: row.id, status: row.status };
+    },
+    async remove(id) { store.set('user_recipes', store.get('user_recipes', []).filter((r) => r.id !== id)); },
+    async favorites() { return store.get('fav_recipes', []); },
+    async setFavorite(key, on) {
+      const rest = store.get('fav_recipes', []).filter((k) => k !== key);
+      store.set('fav_recipes', on ? [...rest, key] : rest);
+    },
+    async stats() {
+      const by = {};
+      store.get('recipe_ratings', []).forEach((r) => { (by[r.key] = by[r.key] || []).push(r.stars); });
+      return Object.fromEntries(Object.entries(by).map(([k, list]) => [k, { rating: Math.round((list.reduce((a, b) => a + b, 0) / list.length) * 10) / 10, votes: list.length }]));
+    },
+    async myRatings() {
+      const user = await local.auth.getUser();
+      if (!user) return {};
+      return Object.fromEntries(store.get('recipe_ratings', []).filter((r) => r.user_id === user.id).map((r) => [r.key, r.stars]));
+    },
+    async rate(key, stars) {
+      const user = await local.auth.getUser();
+      if (!user) throw new Error('Войдите в аккаунт, чтобы оценивать рецепты');
+      const rest = store.get('recipe_ratings', []).filter((r) => !(r.key === key && r.user_id === user.id));
+      store.set('recipe_ratings', [...rest, { key, user_id: user.id, stars }]);
+    },
+  };
+
+  /* ---------- челленджи ---------- */
+
+  const remoteChallenges = {
+    async list() { try { return await run(sb.rpc('challenge_list')); } catch (e) { throw need10(e); } },
+    async board(id) {
+      return (await run(sb.rpc('challenge_board', { cid: id }))).map((r) => ({ ...r, avatar_url: avatarUrl(r.avatar_url) }));
+    },
+    async join(id) { await run(sb.rpc('challenge_join', { cid: id })); },
+    async leave(id) { await run(sb.rpc('challenge_leave', { cid: id })); },
+    async checkin(id) { return run(sb.rpc('challenge_checkin', { cid: id })); },
+    async create(fields) { await run(sb.from('challenges').insert(fields)); },
+    async remove(id) { await run(sb.from('challenges').delete().eq('id', id)); },
+  };
+
+  const DEFAULT_CHALLENGES = [
+    { id: 'c1', title: '7 дней без добавленного сахара', description: 'Без сладких напитков, конфет и выпечки. Фрукты и ягоды можно.', emoji: '🍬', days: 7 },
+    { id: 'c2', title: 'Вода каждый день', description: 'Выпивайте свою норму воды. Её считает калькулятор на сайте.', emoji: '💧', days: 14 },
+    { id: 'c3', title: '5 порций овощей и фруктов', description: 'Не меньше 400 г овощей и фруктов в день, как советует ВОЗ.', emoji: '🥦', days: 10 },
+    { id: 'c4', title: 'Дневник без пропусков', description: 'Записывайте в дневник питания всё, что съели за день.', emoji: '📔', days: 21 },
+  ];
+  function localChallengeRows() { return store.get('challenges', DEFAULT_CHALLENGES); }
+  const todayIso = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const localChallenges = {
+    async list() {
+      const user = await local.auth.getUser();
+      const members = store.get('challenge_members', []);
+      const checkins = store.get('challenge_checkins', []);
+      return localChallengeRows().map((c) => {
+        const mine = user ? checkins.filter((k) => k.challenge_id === c.id && k.user_id === user.id) : [];
+        return {
+          ...c, members: members.filter((m) => m.challenge_id === c.id).length,
+          joined: Boolean(user && members.some((m) => m.challenge_id === c.id && m.user_id === user.id)),
+          done: mine.length, checked_today: mine.some((k) => k.day === todayIso()),
+        };
+      });
+    },
+    async board(id) {
+      const c = localChallengeRows().find((x) => x.id === id);
+      const users = Object.values(store.get('users', {}));
+      const checkins = store.get('challenge_checkins', []).filter((k) => k.challenge_id === id);
+      return store.get('challenge_members', []).filter((m) => m.challenge_id === id).map((m) => {
+        const u = users.find((x) => x.id === m.user_id) || {};
+        const done = checkins.filter((k) => k.user_id === m.user_id).length;
+        return { user_id: m.user_id, name: u.name || 'Пользователь', avatar_url: u.avatar_url || null, done, finished: Boolean(c && done >= c.days) };
+      }).sort((a, b) => b.done - a.done).slice(0, 20);
+    },
+    async join(id) {
+      const user = await localUser();
+      const all = store.get('challenge_members', []);
+      if (!all.some((m) => m.challenge_id === id && m.user_id === user.id)) store.set('challenge_members', [...all, { challenge_id: id, user_id: user.id }]);
+    },
+    async leave(id) {
+      const user = await localUser();
+      store.set('challenge_members', store.get('challenge_members', []).filter((m) => !(m.challenge_id === id && m.user_id === user.id)));
+      store.set('challenge_checkins', store.get('challenge_checkins', []).filter((k) => !(k.challenge_id === id && k.user_id === user.id)));
+    },
+    async checkin(id) {
+      const user = await localUser();
+      const c = localChallengeRows().find((x) => x.id === id);
+      const all = store.get('challenge_checkins', []);
+      const mine = all.filter((k) => k.challenge_id === id && k.user_id === user.id);
+      if (mine.length >= c.days) throw new Error('Челлендж уже пройден 🎉');
+      if (mine.some((k) => k.day === todayIso())) throw new Error('Сегодня вы уже отметились. Возвращайтесь завтра');
+      store.set('challenge_checkins', [...all, { challenge_id: id, user_id: user.id, day: todayIso() }]);
+      if (mine.length + 1 >= c.days) localNotify(user.id, 'challenge', `🏆 Челлендж «${c.title}» пройден!`, 'challenges.html');
+      return mine.length + 1;
+    },
+    async create(fields) { store.set('challenges', [...localChallengeRows(), { ...fields, id: newId() }]); },
+    async remove(id) { store.set('challenges', localChallengeRows().filter((c) => c.id !== id)); },
+  };
+
+  /* ---------- блокировка собеседника и жалобы ---------- */
+
+  const remoteBlocks = {
+    async list() {
+      if (!(await remoteUserId())) return [];
+      try { return (await run(sb.from('user_blocks').select('blocked_id'))).map((r) => r.blocked_id); } catch { return []; }
+    },
+    async set(id, on) {
+      const uid = await remoteUserId();
+      if (!uid) throw new Error('Сначала войдите в аккаунт');
+      try {
+        if (on) await run(sb.from('user_blocks').upsert({ blocked_id: id }, { onConflict: 'blocker_id,blocked_id' }));
+        else await run(sb.from('user_blocks').delete().eq('blocked_id', id).eq('blocker_id', uid));
+      } catch (e) { throw need10(e); }
+    },
+  };
+  const localBlocks = {
+    async list() {
+      const user = await local.auth.getUser();
+      return user ? store.get('blocks', []).filter((b) => b.blocker === user.id).map((b) => b.blocked) : [];
+    },
+    async set(id, on) {
+      const user = await localUser();
+      const rest = store.get('blocks', []).filter((b) => !(b.blocker === user.id && b.blocked === id));
+      store.set('blocks', on ? [...rest, { blocker: user.id, blocked: id }] : rest);
+    },
+  };
+  // демо-режим: блокировка действует в личных чатах, как в базе
+  const localChatSend = localChat.send;
+  localChat.send = async (conv, msg) => {
+    const user = await localUser();
+    const chat = store.get('chats', []).find((c) => c.id === conv);
+    if (chat && !chat.is_group) {
+      const other = (store.get('chat_members', []).find((m) => m.conversation_id === conv && m.user_id !== user.id) || {}).user_id;
+      const blocks = store.get('blocks', []);
+      if (blocks.some((b) => b.blocker === other && b.blocked === user.id)) throw new Error('Этот пользователь ограничил сообщения от вас');
+      if (blocks.some((b) => b.blocker === user.id && b.blocked === other)) throw new Error('Вы заблокировали этого пользователя. Разблокируйте его, чтобы написать');
+    }
+    return localChatSend(conv, msg);
+  };
+
+  /* kind: post | reply | message | profile */
+  async function report(kind, target, reason) {
+    if (useSupabase) {
+      try { await run(sb.rpc('report_create', { kind_: kind, target: String(target), reason_: reason || '' })); } catch (e) { throw need10(e); }
+      return;
+    }
+    const user = await localUser();
+    const find = {
+      post: () => { const p = store.get('forum_posts', []).find((x) => String(x.id) === String(target)); return p && [p.author_id, `${p.title}\n${p.body}`]; },
+      reply: () => { const r = store.get('forum_replies', []).find((x) => String(x.id) === String(target)); return r && [r.author_id, r.body]; },
+      message: () => { const m = store.get('chat_msgs', []).find((x) => String(x.id) === String(target)); return m && [m.sender_id, m.body || `[${m.kind}: ${m.file_name || ''}]`]; },
+      profile: () => { const u = Object.values(store.get('users', {})).find((x) => x.id === target); return u && [u.id, `Профиль: ${u.name}`]; },
+    }[kind];
+    const hit = find && find();
+    if (!hit) throw new Error('Не нашли то, на что вы жалуетесь. Возможно, это уже удалено');
+    if (hit[0] === user.id) throw new Error('Нельзя пожаловаться на себя');
+    const all = store.get('reports', []);
+    if (all.some((r) => r.reporter_id === user.id && r.kind === kind && String(r.target_id) === String(target) && r.status === 'open')) {
+      throw new Error('Вы уже отправили эту жалобу — она ждёт проверки');
+    }
+    all.push({ id: newId(), reporter_id: user.id, reporter_name: user.name, kind, target_id: String(target), target_user: hit[0], excerpt: String(hit[1]).slice(0, 600), reason: reason || null, status: 'open', created_at: new Date().toISOString() });
+    store.set('reports', all);
+  }
+
+  /* ---------- админка: рецепты, жалобы, очереди ---------- */
+
+  Object.assign(remoteAdmin, {
+    async recipeRequests() {
+      const rows = await run(sb.rpc('admin_recipe_requests'));
+      return rows.map((r) => ({ ...r, photo_url: avatarUrl(r.photo_path) }));
+    },
+    async reviewRecipe(id, approve) { await run(sb.rpc('admin_review_recipe', { recipe_id: id, approve })); },
+    async reports() { return run(sb.rpc('admin_reports')); },
+    async resolveReport(id, action) { await run(sb.rpc('admin_resolve_report', { report_id: id, action })); },
+    async queueCounts() {
+      try { return await run(sb.rpc('admin_queue_counts')); } catch { return {}; }
+    },
+  });
+
+  Object.assign(localAdmin, {
+    async recipeRequests() { return store.get('user_recipes', []).filter((r) => r.status === 'pending'); },
+    async reviewRecipe(id, approve) {
+      const all = store.get('user_recipes', []);
+      const r = all.find((x) => x.id === id);
+      if (!r) return;
+      r.status = approve ? 'approved' : 'rejected';
+      store.set('user_recipes', all);
+      localNotify(r.user_id, 'recipe', approve ? `✅ Ваш рецепт «${r.title}» опубликован` : `Рецепт «${r.title}» не прошёл проверку`, `recipes.html#u${r.id}`);
+    },
+    async reports() {
+      const users = Object.values(store.get('users', {}));
+      const open = store.get('reports', []).filter((r) => r.status === 'open');
+      return open.map((r) => {
+        const u = users.find((x) => x.id === r.target_user) || {};
+        return { ...r, target_name: u.name || 'Пользователь', target_email: u.email || '', same_target: open.filter((x) => x.kind === r.kind && x.target_id === r.target_id).length };
+      });
+    },
+    async resolveReport(id, action) {
+      const all = store.get('reports', []);
+      const r = all.find((x) => x.id === id);
+      if (!r) return;
+      if (action === 'delete') {
+        if (r.kind === 'profile') throw new Error('Профиль так удалить нельзя — используйте мут или удаление во вкладке «Пользователи»');
+        const table = { post: 'forum_posts', reply: 'forum_replies', message: 'chat_msgs' }[r.kind];
+        store.set(table, store.get(table, []).filter((x) => String(x.id) !== r.target_id));
+      }
+      all.forEach((x) => { if (x.kind === r.kind && x.target_id === r.target_id && x.status === 'open') x.status = action === 'delete' ? 'resolved' : 'dismissed'; });
+      store.set('reports', all);
+      localNotify(r.reporter_id, 'report', action === 'delete' ? 'Спасибо за жалобу: нарушение удалено' : 'Ваша жалоба рассмотрена: нарушений не нашли', null);
+    },
+    async queueCounts() {
+      return {
+        products: store.get('product_requests', []).filter((r) => r.status === 'pending').length,
+        recipes: store.get('user_recipes', []).filter((r) => r.status === 'pending').length,
+        reports: store.get('reports', []).filter((r) => r.status === 'open').length,
+      };
+    },
+  });
+
   /* поиск участников по нику (без почты) */
   async function searchUsers(q) {
     const term = String(q || '').trim();
@@ -1229,6 +1730,14 @@
     dm: useSupabase ? remoteDm : localDm,
     products: useSupabase ? remoteProducts : localProducts,
     chat: useSupabase ? remoteChat : localChat,
+    activity,
+    prefs,
+    stats,
+    notifs: useSupabase ? remoteNotifs : localNotifs,
+    recipes: useSupabase ? remoteRecipes : localRecipes,
+    challenges: useSupabase ? remoteChallenges : localChallenges,
+    blocks: useSupabase ? remoteBlocks : localBlocks,
+    report,
     publicProfiles,
     searchUsers,
     checkText,

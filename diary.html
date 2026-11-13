@@ -45,7 +45,20 @@
       <p class="form-note hidden" id="guest-note" style="max-width:760px;margin:0 auto 24px;text-align:center"></p>
 
       <div class="diet-layout">
-        <div class="meals" id="meals"><p class="muted">Загрузка…</p></div>
+        <div class="diary-main">
+          <div class="meals" id="meals"><p class="muted">Загрузка…</p></div>
+
+          <section class="card meal" id="activity-card">
+            <div class="meal-head"><h3>🏃 Активность</h3><span class="meal-kcal" id="act-total">0 ккал</span></div>
+            <div id="act-list"></div>
+            <form class="act-form" id="act-form" novalidate>
+              <select class="select" id="act-kind" aria-label="Вид активности"></select>
+              <input class="input" id="act-min" type="number" min="1" max="1440" step="5" placeholder="мин" aria-label="Минуты">
+              <button class="btn btn-lime" type="submit">Добавить</button>
+            </form>
+            <p class="small muted" id="act-hint"></p>
+          </section>
+        </div>
 
         <aside class="summary">
           <div class="card">
@@ -53,12 +66,14 @@
             <div class="kcal-big"><span id="sum-kcal">0</span> <small>/ <span id="sum-target">2000</span> ккал</small></div>
             <div class="progress" id="sum-progress"><div style="width:0"></div></div>
             <p class="small muted" id="sum-hint"></p>
+            <p class="small hidden" id="sum-activity"></p>
             <div class="macro-bars" id="macros"></div>
 
             <h3 style="margin-bottom:0">Последние 7 дней</h3>
             <div class="week-chart" id="week-chart"></div>
 
             <button class="btn btn-ghost btn-block" type="button" id="from-plan" style="margin-top:12px">Перенести меню из конструктора</button>
+            <button class="btn btn-ghost btn-block" type="button" id="export-btn" style="margin-top:8px">⬇️ Выгрузить дневник в файл</button>
           </div>
         </aside>
       </div>

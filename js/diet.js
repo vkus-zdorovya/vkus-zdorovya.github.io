@@ -7,6 +7,8 @@
   const DAY_NAMES = ['понедельник', 'вторник', 'среду', 'четверг', 'пятницу', 'субботу', 'воскресенье'];
 
   let state = store.get('diet_draft') || newState();
+  /* что исключить при автоподборе: предпочтения из Кабинета */
+  let avoid = DB.prefs.clean(store.get('prefs')).avoid;
   const fromCalc = store.get('target');
   if (fromCalc && fromCalc.kcal && document.referrer.includes('calculator')) {
     state.target = fromCalc.kcal;
@@ -157,7 +159,11 @@
     const day = emptyDay();
     const used = {};
     for (const [key, , share] of MEALS) {
-      const templates = window.MEAL_TEMPLATES[key];
+      // учитываем предпочтения из Кабинета: берём только подходящие наборы, а если таких нет — убираем лишнее из набора
+      const all = window.MEAL_TEMPLATES[key];
+      const fits = all.filter((t) => !t.some(([id]) => window.foodConflicts(id, avoid).length));
+      const templates = fits.length ? fits : all.map((t) => t.filter(([id]) => !window.foodConflicts(id, avoid).length)).filter((t) => t.length);
+      if (!templates.length) continue;
       const idx = pick(templates.length, prev[key]);
       used[key] = idx;
       const tpl = templates[idx];
@@ -330,5 +336,9 @@
   });
 
   render();
-  userReady.then((u) => { user = u; renderSaved(); });
+  userReady.then((u) => {
+    user = u;
+    if (u) avoid = DB.prefs.clean(u.prefs).avoid;
+    renderSaved();
+  });
 })();

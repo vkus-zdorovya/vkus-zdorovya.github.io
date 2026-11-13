@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Челленджи — Вкус здоровья</title>
+  <meta name="description" content="Челленджи о здоровом питании: неделя без сахара, вода каждый день, овощи и фрукты. Присоединяйтесь, отмечайтесь каждый день и следите за таблицей лидеров.">
+  <meta name="theme-color" content="#2d5f3b">
+  <link rel="icon" href="img/logo.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="ВкусЗдоровья">
+  <script src="js/theme.js"></script>
+  <link rel="preload" href="fonts/inter-cyrillic-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="css/style.css">
+  <script defer src="js/vendor/supabase.js"></script>
+  <script defer src="js/config.js"></script>
+  <script defer src="js/db.js"></script>
+  <script defer src="js/data.js"></script>
+  <script defer src="js/main.js"></script>
+  <script defer src="js/challenges.js"></script>
+</head>
+<body>
+  <header id="site-header"></header>
+
+  <main>
+    <section class="page-head">
+      <div class="container">
+        <h1>Челленджи</h1>
+        <p>Маленькие ежедневные шаги к здоровым привычкам. Присоединяйтесь, отмечайте каждый выполненный день и соревнуйтесь с другими участниками.</p>
+      </div>
+    </section>
+
+    <section class="container" style="padding-bottom:64px;max-width:980px">
+      <div class="challenges" id="challenges" aria-live="polite"><p class="muted">Загрузка…</p></div>
+      <p class="disclaimer">Отметка ставится один раз в день и честно — на доверии. Пройденные челленджи превращаются в достижения в вашем профиле.</p>
+    </section>
+  </main>
+
+  <footer id="site-footer"></footer>
+</body>
+</html>

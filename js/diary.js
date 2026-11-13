@@ -7,6 +7,9 @@
   const mealsEl = document.getElementById('meals');
   let date = isoDate();
   let entries = [];
+  let acts = [];
+  let actsOk = true; // false — раздел активности ещё не подключён в базе
+  let photoUrls = {};
 
   const target = DB.store.get('target') || {};
   const kcalTarget = target.kcal || 2000;
@@ -38,9 +41,22 @@
       mealsEl.innerHTML = `<p class="form-error">${esc(err.message)}</p>`;
       return;
     }
+    // фото блюд лежат в закрытом хранилище — получаем временные ссылки
+    const paths = entries.filter((e) => e.photo_path).map((e) => e.photo_path);
+    photoUrls = paths.length ? await DB.diary.photoUrls(paths).catch(() => ({})) : {};
+    try {
+      acts = await DB.activity.list(date);
+      actsOk = true;
+    } catch {
+      acts = [];
+      actsOk = false;
+    }
     render();
+    renderActivity();
     renderWeek();
   }
+
+  const photoOf = (e) => e.photo_url || photoUrls[e.photo_path] || '';
 
   function render() {
     mealsEl.innerHTML = MEALS.map(([key, title]) => {
@@ -51,7 +67,7 @@
           <div class="meal-head"><h3>${title}</h3><span class="meal-kcal">${Math.round(kcal)} ккал</span></div>
           ${items.length ? `<ul class="meal-items">${items.map((e) => `
             <li class="meal-item">
-              <span class="name">${esc(e.name)}</span>
+              <span class="name">${photoOf(e) ? `<button class="diary-photo" type="button" data-photo="${esc(photoOf(e))}" aria-label="Открыть фото блюда"><img src="${esc(photoOf(e))}" alt="" loading="lazy"></button>` : ''}${esc(e.name)}</span>
               <span class="grams small muted" style="text-align:right">${Number(e.grams)} г</span>
               <span class="kcal">${Math.round(e.kcal)} ккал</span>
               <button class="icon-btn" type="button" data-del="${e.id}" aria-label="Удалить">✕</button>
@@ -69,6 +85,7 @@
             <input class="input" name="p" type="number" min="0" step="0.1" placeholder="Белки/100 г" aria-label="Белки на 100 г">
             <input class="input" name="f" type="number" min="0" step="0.1" placeholder="Жиры/100 г" aria-label="Жиры на 100 г">
             <input class="input" name="c" type="number" min="0" step="0.1" placeholder="Углев./100 г" aria-label="Углеводы на 100 г">
+            <label class="btn btn-ghost btn-sm photo-label" style="cursor:pointer">📷 <span>Фото блюда</span><input type="file" name="photo" accept="image/jpeg,image/png,image/webp" class="sr-only"></label>
             <button class="btn btn-primary btn-sm" type="submit">Записать</button>
           </form>
         </section>`;
@@ -102,6 +119,109 @@
         <span>${Math.round(sum[key])}/${macroTarget[key]} г</span>
       </div>`).join('');
   }
+
+  /* ---------- активность ---------- */
+
+  const bodyWeight = () => { const b = DB.store.get('body'); return b && Number(b.weight) > 0 ? Number(b.weight) : null; };
+  const actKind = document.getElementById('act-kind');
+  actKind.innerHTML = window.ACTIVITIES.map(([id, label]) => `<option value="${id}">${esc(label)}</option>`).join('');
+
+  function renderActivity() {
+    const card = document.getElementById('activity-card');
+    const burned = acts.reduce((s, a) => s + Number(a.kcal), 0);
+    document.getElementById('act-total').textContent = `−${Math.round(burned)} ккал`;
+    document.getElementById('act-form').classList.toggle('hidden', !actsOk);
+    document.getElementById('act-list').innerHTML = !actsOk
+      ? '<p class="meal-empty">Раздел активности ещё не подключён: выполните в Supabase файл schema-10-community.sql.</p>'
+      : acts.length ? `<ul class="meal-items">${acts.map((a) => `
+          <li class="meal-item">
+            <span class="name">${esc(a.name)}</span>
+            <span class="grams small muted" style="text-align:right">${Number(a.minutes)} мин</span>
+            <span class="kcal">−${Math.round(a.kcal)} ккал</span>
+            <button class="icon-btn" type="button" data-del-act="${a.id}" aria-label="Удалить">✕</button>
+          </li>`).join('')}</ul>` : '<p class="meal-empty">Тренировок и прогулок пока нет</p>';
+    const w = bodyWeight();
+    document.getElementById('act-hint').innerHTML = w
+      ? `Расход считается по вашему весу из калькулятора (${w} кг). Это оценка: точный расход зависит от темпа и подготовки.`
+      : 'Расход считается для веса 70 кг. Чтобы было точнее, заполните <a href="calculator.html">калькулятор</a>.';
+    const note = document.getElementById('sum-activity');
+    note.classList.toggle('hidden', !burned);
+    if (burned) {
+      const eaten = entries.reduce((s, e) => s + Number(e.kcal), 0);
+      note.textContent = `🏃 Активность: −${Math.round(burned)} ккал. С её учётом за день: ${Math.round(eaten - burned).toLocaleString('ru-RU')} ккал.`;
+    }
+    card.classList.remove('hidden');
+  }
+
+  document.getElementById('act-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const minutes = Number(document.getElementById('act-min').value);
+    const kind = window.ACTIVITIES.find(([id]) => id === actKind.value);
+    if (!kind || !(minutes >= 1 && minutes <= 1440)) { toast('Укажите, сколько минут длилась активность', 'error'); return; }
+    const kcal = Math.round(kind[2] * (bodyWeight() || 70) * (minutes / 60));
+    try {
+      await DB.activity.add({ date, name: kind[1].replace(/^\S+\s/, ''), minutes, kcal });
+      document.getElementById('act-min').value = '';
+      await load();
+    } catch (err) { toast(err.message, 'error'); }
+  });
+  document.getElementById('act-list').addEventListener('click', async (e) => {
+    const del = e.target.closest('[data-del-act]');
+    if (!del) return;
+    try {
+      await DB.activity.remove(del.dataset.delAct);
+      await load();
+    } catch (err) { toast(err.message, 'error'); }
+  });
+
+  /* ---------- фото блюда ---------- */
+
+  function shrink(file) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, 900 / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * k);
+        canvas.height = Math.round(img.height * k);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        URL.revokeObjectURL(img.src);
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Не удалось обработать фото'))), 'image/jpeg', 0.82);
+      };
+      img.onerror = () => reject(new Error('Не удалось открыть фото'));
+      img.src = URL.createObjectURL(file);
+    });
+  }
+
+  /* ---------- выгрузка в файл (открывается в Excel) ---------- */
+
+  async function exportCsv() {
+    const to = isoDate();
+    const from = shift(to, -365);
+    let rows;
+    let activity = [];
+    try { rows = await DB.diary.list(from, to); } catch (err) { toast(err.message, 'error'); return; }
+    try { activity = await DB.activity.list(from, to); } catch { activity = []; }
+    if (!rows.length && !activity.length) { toast('В дневнике пока нет записей за последний год', 'error'); return; }
+    const mealName = Object.fromEntries(MEALS.map(([k, t]) => [k, t]));
+    const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const n = (v) => String(Math.round(Number(v) * 10) / 10).replace('.', ',');
+    const out = [['Дата', 'Раздел', 'Название', 'Количество', 'Ккал', 'Белки, г', 'Жиры, г', 'Углеводы, г']];
+    rows.forEach((r) => out.push([r.date, mealName[r.meal] || r.meal, r.name, `${n(r.grams)} г`, n(r.kcal), n(r.protein), n(r.fat), n(r.carbs)]));
+    activity.forEach((a) => out.push([a.date, 'Активность', a.name, `${n(a.minutes)} мин`, n(-a.kcal), '', '', '']));
+    out.sort((a, b) => (a[0] === 'Дата' ? -1 : b[0] === 'Дата' ? 1 : String(a[0]).localeCompare(String(b[0]))));
+    // «;» и метка UTF-8 в начале — чтобы русский Excel открыл файл без настройки
+    const blob = new Blob(['\ufeff' + out.map((line) => line.map(cell).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `dnevnik-pitaniya-${to}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    toast(`Выгружено записей: ${out.length - 1}`);
+  }
+  document.getElementById('export-btn').addEventListener('click', exportCsv);
 
   async function renderWeek() {
     const from = shift(date, -6);
@@ -153,7 +273,7 @@
     }
   });
 
-  mealsEl.addEventListener('submit', (e) => {
+  mealsEl.addEventListener('submit', async (e) => {
     e.preventDefault();
     const form = e.target;
     if (form.matches('.meal-add')) {
@@ -163,13 +283,18 @@
       if (!(g > 0 && g <= 5000)) { form.grams.classList.add('invalid'); return; }
       add(diaryEntry(id, g, form.dataset.meal, date));
     } else if (form.matches('.custom-food')) {
-      const v = Object.fromEntries([...new FormData(form)].map(([k, x]) => [k, k === 'name' ? x.trim() : Number(x)]));
+      const v = Object.fromEntries([...new FormData(form)].filter(([k]) => k !== 'photo').map(([k, x]) => [k, k === 'name' ? x.trim() : Number(x)]));
       if (!v.name || !(v.grams > 0) || !(v.kcal >= 0) || form.kcal.value === '') {
         toast('Укажите название, граммы и калорийность', 'error');
         return;
       }
       const k = v.grams / 100;
+      let photo = null;
+      if (form.photo.files[0]) {
+        try { photo = await shrink(form.photo.files[0]); } catch (err) { toast(err.message, 'error'); return; }
+      }
       add({
+        ...(photo ? { photo } : {}),
         date, meal: form.dataset.customForm, name: v.name, grams: v.grams,
         kcal: Math.round(v.kcal * k), protein: +((v.p || 0) * k).toFixed(1),
         fat: +((v.f || 0) * k).toFixed(1), carbs: +((v.c || 0) * k).toFixed(1),
@@ -189,6 +314,19 @@
       }
     }
     if (custom) mealsEl.querySelector(`[data-custom-form="${custom.dataset.custom}"]`).classList.toggle('hidden');
+    const ph = e.target.closest('[data-photo]');
+    if (ph) {
+      const box = document.createElement('div');
+      box.className = 'img-viewer';
+      box.innerHTML = `<img src="${esc(ph.dataset.photo)}" alt="Фото блюда">`;
+      box.addEventListener('click', () => box.remove());
+      document.body.appendChild(box);
+    }
+  });
+  mealsEl.addEventListener('change', (e) => {
+    if (e.target.matches('.custom-food input[type="file"]')) {
+      e.target.closest('label').querySelector('span').textContent = e.target.files[0] ? '✓ фото выбрано' : 'Фото блюда';
+    }
   });
 
   document.getElementById('week-chart').addEventListener('click', (e) => {
