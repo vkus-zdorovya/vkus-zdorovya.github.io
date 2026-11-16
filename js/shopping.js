@@ -38,12 +38,15 @@
   }
 
   function qty({ grams, eggs }) {
-    if (eggs) return `${Math.max(1, Math.round(grams / 55))} шт`;
+    if (eggs) return `${Math.max(1, Math.ceil(grams / 55))} шт`;
     if (grams >= 1000) return `${(Math.ceil(grams / 100) / 10).toLocaleString('ru-RU')} кг`;
     return `${Math.max(10, Math.ceil(grams / 10) * 10)} г`;
   }
 
   let current = null;
+  const sorted = (items) => Object.entries(items).sort(([a], [b]) => a.localeCompare(b, 'ru'));
+  /* отметка действует, только пока количество не изменилось — иначе после смены меню она сбрасывается */
+  const isChecked = (name, item) => checked[name] === qty(item);
 
   function render() {
     current = collect();
@@ -53,13 +56,22 @@
       box.innerHTML = '<p class="form-note">Рацион пока пуст. <a href="diet.html">Соберите меню</a> или добавьте блюда из <a href="recipes.html">рецептов</a> — и список появится здесь.</p>';
       return;
     }
+    // убираем отметки продуктов, которых больше нет или у которых изменилось количество
+    const now = {};
+    Object.values(current.groups).forEach((items) => Object.entries(items).forEach(([name, item]) => {
+      if (isChecked(name, item)) now[name] = checked[name];
+    }));
+    if (Object.keys(now).length !== Object.keys(checked).length) {
+      checked = now;
+      DB.store.set('shop_checked', checked);
+    }
     info.textContent = current.week ? 'Список на неделю (7 дней).' : 'Список на один день. Переключите конструктор в режим «Неделя», чтобы закупиться на 7 дней.';
     box.innerHTML = Object.entries(current.groups).map(([cat, items]) => `
       <div class="shop-group">
         <h3>${esc(cat)}</h3>
-        <ul class="shop-list">${Object.entries(items).sort(([a], [b]) => a.localeCompare(b, 'ru')).map(([name, item]) => `
+        <ul class="shop-list">${sorted(items).map(([name, item]) => `
           <li><label>
-            <input type="checkbox" data-name="${esc(name)}"${checked[name] ? ' checked' : ''}>
+            <input type="checkbox" data-name="${esc(name)}" data-qty="${esc(qty(item))}"${isChecked(name, item) ? ' checked' : ''}>
             <span>${esc(name)}</span><span class="qty">${qty(item)}</span>
           </label></li>`).join('')}
         </ul>
@@ -68,20 +80,22 @@
 
   function asText() {
     return 'Список покупок — ВкусЗдоровья\n\n' + Object.entries(current.groups).map(([cat, items]) =>
-      `${cat}:\n` + Object.entries(items).map(([name, item]) => `${checked[name] ? '✓' : '•'} ${name} — ${qty(item)}`).join('\n')
+      `${cat}:\n` + sorted(items).map(([name, item]) => `${isChecked(name, item) ? '✓' : '•'} ${name} — ${qty(item)}`).join('\n')
     ).join('\n\n');
   }
 
   box.addEventListener('change', (e) => {
     const cb = e.target.closest('input[type="checkbox"]');
     if (!cb) return;
-    if (cb.checked) checked[cb.dataset.name] = true;
+    if (cb.checked) checked[cb.dataset.name] = cb.dataset.qty;
     else delete checked[cb.dataset.name];
     DB.store.set('shop_checked', checked);
   });
 
+  const emptyNote = () => toast('Список пуст — сначала соберите меню в конструкторе рациона', 'error');
+
   document.getElementById('copy').addEventListener('click', async () => {
-    if (current.empty) return;
+    if (current.empty) return emptyNote();
     try {
       await navigator.clipboard.writeText(asText());
       toast('Список скопирован — вставьте его в заметки или мессенджер');
@@ -94,11 +108,12 @@
   if (navigator.share) {
     shareBtn.classList.remove('hidden');
     shareBtn.addEventListener('click', () => {
-      if (!current.empty) navigator.share({ title: 'Список покупок', text: asText() }).catch(() => {});
+      if (current.empty) return emptyNote();
+      navigator.share({ title: 'Список покупок', text: asText() }).catch(() => {});
     });
   }
 
-  document.getElementById('print').addEventListener('click', () => window.print());
+  document.getElementById('print').addEventListener('click', () => (current.empty ? emptyNote() : window.print()));
   document.getElementById('reset').addEventListener('click', () => {
     checked = {};
     DB.store.set('shop_checked', checked);

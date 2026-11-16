@@ -5,8 +5,10 @@
   const form = document.getElementById('quick-bmi');
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    const h = parseFloat(String(form.height.value).replace(',', '.'));
-    const w = parseFloat(String(form.weight.value).replace(',', '.'));
+    // экспоненциальную запись (1e2) не принимаем
+    const num = (v) => (/e/i.test(String(v)) ? NaN : parseFloat(String(v).replace(',', '.')));
+    const h = num(form.height.value);
+    const w = num(form.weight.value);
     const okH = h >= 100 && h <= 250;
     const okW = w >= 25 && w <= 300;
     form.height.classList.toggle('invalid', !okH);

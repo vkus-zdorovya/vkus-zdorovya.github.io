@@ -30,8 +30,8 @@
     const sum = { kcal: 0, p: 0, f: 0, c: 0 };
     for (const [key] of MEALS) {
       for (const item of day[key]) {
-        const food = FOOD[item.id];
-        if (!food) continue;
+        if (!FOOD[item.id]) continue;
+        const food = FOOD[item.id].exact || FOOD[item.id];
         const k = item.g / 100;
         sum.kcal += food.kcal * k;
         sum.p += food.p * k;
@@ -42,7 +42,9 @@
     return sum;
   }
 
-  const itemKcal = (item) => Math.round((FOOD[item.id] ? FOOD[item.id].kcal : 0) * item.g / 100);
+  const itemKcal = (item) => Math.round((FOOD[item.id] ? (FOOD[item.id].exact || FOOD[item.id]).kcal : 0) * item.g / 100);
+  /* калории дня как сумма округлённых строк — чтобы итог совпадал с суммой приёмов */
+  const dayKcal = (day) => MEALS.reduce((s, [key]) => s + day[key].reduce((t, it) => t + itemKcal(it), 0), 0);
 
   function save() {
     PLAN.saveDraft(state);
@@ -81,7 +83,7 @@
         ? `<ul class="meal-items">${items.map((it, i) => `
             <li class="meal-item">
               <span class="name">${esc(FOOD[it.id] ? FOOD[it.id].name : it.id)}</span>
-              <input class="input" type="number" min="1" max="2000" step="5" value="${it.g}" data-meal="${key}" data-i="${i}" aria-label="Граммы">
+              <input class="input" type="number" min="1" max="2000" step="1" value="${it.g}" data-meal="${key}" data-i="${i}" aria-label="Граммы">
               <span class="kcal">${itemKcal(it)} ккал</span>
               <button class="icon-btn" type="button" data-remove="${key}" data-i="${i}" aria-label="Удалить">✕</button>
             </li>`).join('')}</ul>`
@@ -93,9 +95,9 @@
             <span class="meal-kcal">${mealKcal} / ~${Math.round(state.target * share)} ккал</span>
           </div>
           ${list}
-          <form class="meal-add" data-meal="${key}">
+          <form class="meal-add" data-meal="${key}" novalidate>
             <select class="select" name="food" aria-label="Продукт для: ${title}">${foodOptions}</select>
-            <input class="input" name="grams" type="number" min="1" max="2000" step="5" placeholder="г" aria-label="Граммы">
+            <input class="input" name="grams" type="number" min="1" max="2000" step="1" placeholder="г" aria-label="Граммы">
             <button class="btn btn-lime" type="submit">Добавить</button>
           </form>
         </section>`;
@@ -108,8 +110,9 @@
   function renderSummary() {
     const week = state.mode === 'week';
     const sum = totals(currentDay());
+    sum.kcal = dayKcal(currentDay());
     document.getElementById('sum-title').textContent = week ? `Итог за ${DAY_NAMES[state.day]}` : 'Итог за день';
-    document.getElementById('sum-kcal').textContent = Math.round(sum.kcal).toLocaleString('ru-RU');
+    document.getElementById('sum-kcal').textContent = sum.kcal.toLocaleString('ru-RU');
     document.getElementById('sum-target').textContent = state.target.toLocaleString('ru-RU');
 
     const ratio = sum.kcal / state.target;
@@ -135,24 +138,48 @@
     ].map(([color, name, g, k]) => `<li><i style="background:${color}"></i>${name}: <b>${Math.round(g)} г</b> <span class="muted">(${Math.round((k / all) * 100)}%)</span></li>`).join('');
 
     if (week) {
-      const kcals = state.days.map((d) => totals(d).kcal);
+      const kcals = state.days.map(dayKcal);
       const max = Math.max(state.target * 1.25, ...kcals);
       document.getElementById('week-chart').innerHTML =
         `<div class="target-line" style="bottom:${22 + (state.target / max) * 130}px" title="Норма"></div>` +
         kcals.map((k, i) => `
-          <div class="week-col${i === state.day ? ' active' : ''}" data-day="${i}" title="${DAYS[i]}: ${Math.round(k)} ккал">
+          <div class="week-col${i === state.day ? ' active' : ''}" data-day="${i}" title="${DAYS[i]}: ${k} ккал" aria-label="${DAYS[i]}: ${k} ккал">
+            <b class="week-val">${k || ''}</b>
             <div style="height:${(k / max) * 130}px"></div><span>${DAYS[i]}</span>
           </div>`).join('');
+      document.getElementById('week-legend').innerHTML =
+        `<i aria-hidden="true"></i> норма ${state.target.toLocaleString('ru-RU')} ккал · над столбцами — ккал за день`;
     }
   }
 
   /* ---------- автоподбор ---------- */
 
-  /* случайный шаблон, но не тот же, что вчера */
-  function pick(count, avoid) {
-    let idx;
-    do idx = Math.floor(Math.random() * count); while (idx === avoid && count > 1);
-    return idx;
+  const kcalOf = (tpl) => tpl.reduce((s, [id, g]) => s + FOOD[id].kcal * g / 100, 0);
+  /* доля калорий из белка в наборе */
+  const proteinShare = (tpl) => tpl.reduce((s, [id, g]) => s + FOOD[id].p * 4 * g / 100, 0) / (kcalOf(tpl) || 1);
+  /* напитки и «объёмные» блюда (супы, овощи, кефир) почти не масштабируем — добираем калории плотными продуктами */
+  const isDrink = (id) => FOOD[id].kcal < 5;
+  const isBulk = (id) => FOOD[id].kcal <= 75;
+
+  /* масштабирует набор под нужные калории */
+  function scaleTemplate(tpl, need) {
+    const scale = need / kcalOf(tpl);
+    let bulkScale = Math.min(1.3, Math.max(0.7, scale));
+    let bulkBase = 0, denseBase = 0;
+    tpl.forEach(([id, g]) => {
+      if (isDrink(id)) return;
+      if (isBulk(id)) bulkBase += FOOD[id].kcal * g / 100;
+      else denseBase += FOOD[id].kcal * g / 100;
+    });
+    const clamp = (x) => Math.min(3, Math.max(0.5, x));
+    // если плотных продуктов в наборе нет, масштабируем всё одинаково
+    const denseScale = denseBase ? clamp((need - bulkBase * bulkScale) / denseBase) : clamp(scale);
+    // плотные продукты упёрлись в предел — добираем остаток объёмными, но не больше чем вдвое
+    if (denseBase && bulkBase && denseScale === 3) bulkScale = Math.min(2, Math.max(bulkScale, (need - denseBase * 3) / bulkBase));
+    return tpl.map(([id, g]) => {
+      const k = isDrink(id) ? 1 : denseBase && isBulk(id) ? bulkScale : denseScale;
+      return { id, g: Math.max(5, Math.round((g * k) / 5) * 5) };
+    });
   }
 
   function autoFill(dayIndex, prev = {}) {
@@ -162,14 +189,19 @@
       // учитываем предпочтения из Кабинета: берём только подходящие наборы, а если таких нет — убираем лишнее из набора
       const all = window.MEAL_TEMPLATES[key];
       const fits = all.filter((t) => !t.some(([id]) => window.foodConflicts(id, avoid).length));
-      const templates = fits.length ? fits : all.map((t) => t.filter(([id]) => !window.foodConflicts(id, avoid).length)).filter((t) => t.length);
+      let templates = fits.length ? fits : all.map((t) => t.filter(([id]) => !window.foodConflicts(id, avoid).length)).filter((t) => t.length);
       if (!templates.length) continue;
-      const idx = pick(templates.length, prev[key]);
-      used[key] = idx;
+      // при похудении и наборе массы нужен белок (как в калькуляторе — 1,8 г/кг): берём более белковую половину наборов
+      if (state.goal === 'lose' || state.goal === 'gain') {
+        const sorted = [...templates].sort((a, b) => proteinShare(b) - proteinShare(a));
+        templates = sorted.slice(0, Math.max(3, Math.ceil(sorted.length / 2)));
+      }
+      const prevTpl = prev[key];
+      let idx;
+      do idx = Math.floor(Math.random() * templates.length); while (templates[idx] === prevTpl && templates.length > 1);
       const tpl = templates[idx];
-      const base = tpl.reduce((s, [id, g]) => s + FOOD[id].kcal * g / 100, 0);
-      const scale = Math.min(2.5, Math.max(0.5, (state.target * share) / base));
-      day[key] = tpl.map(([id, g]) => ({ id, g: Math.max(5, Math.round((g * scale) / 5) * 5) }));
+      used[key] = tpl;
+      day[key] = scaleTemplate(tpl, state.target * share);
     }
     state.days[dayIndex] = day;
     return used;
@@ -178,8 +210,18 @@
   /* ---------- события ---------- */
 
   els.target.addEventListener('change', () => {
-    const v = Math.round(Number(els.target.value));
-    state.target = v >= 1000 && v <= 6000 ? v : state.target;
+    const raw = els.target.value.trim();
+    const n = Number(raw);
+    const v = Math.round(n / 10) * 10;
+    // диапазон проверяем по введённому числу, а не по округлённому
+    if (raw && n >= 1000 && n <= 6000) {
+      state.target = v;
+      els.target.classList.remove('invalid');
+    } else {
+      toast('Норма должна быть от 1000 до 6000 ккал', 'error');
+      els.target.classList.add('invalid');
+      setTimeout(() => els.target.classList.remove('invalid'), 2500);
+    }
     render();
   });
   els.goal.addEventListener('change', () => { state.goal = els.goal.value; save(); });
@@ -206,15 +248,22 @@
     render();
   });
 
+  let lastDayPick = {};
   document.getElementById('auto-btn').addEventListener('click', () => {
     if (state.mode === 'week') {
       let prev = {};
       for (let i = 0; i < 7; i++) prev = autoFill(i, prev);
     } else {
-      autoFill(0);
+      lastDayPick = autoFill(0, lastDayPick);
     }
     render();
-    toast('Меню подобрано — можно поправить продукты и граммы');
+    const days = state.mode === 'week' ? state.days : [state.days[0]];
+    const worst = days.map(dayKcal).reduce((w, k) => (Math.abs(k - state.target) > Math.abs(w - state.target) ? k : w));
+    if (Math.abs(worst - state.target) > state.target * 0.1) {
+      toast(`Точно подобрать не удалось: ~${worst.toLocaleString('ru-RU')} из ${state.target.toLocaleString('ru-RU')} ккал. Добавьте продукты вручную.`, 'error');
+    } else {
+      toast('Меню подобрано — можно поправить продукты и граммы');
+    }
   });
 
   els.copy.addEventListener('click', () => {
@@ -259,13 +308,16 @@
     e.preventDefault();
     const form = e.target;
     const id = form.food.value;
-    const g = Math.round(Number(form.grams.value) || (FOOD[id] && FOOD[id].portion));
+    const raw = form.grams.value.trim();
+    const g = Math.round(raw ? Number(raw) : (FOOD[id] && FOOD[id].portion));
+    form.food.classList.toggle('invalid', !FOOD[id]);
     if (!FOOD[id]) {
-      form.food.classList.add('invalid');
+      toast('Выберите продукт', 'error');
       return;
     }
     if (!(g > 0 && g <= 2000)) {
       form.grams.classList.add('invalid');
+      toast('Укажите от 1 до 2000 г', 'error');
       return;
     }
     currentDay()[form.dataset.meal].push({ id, g });

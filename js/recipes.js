@@ -17,8 +17,16 @@
   const builtin = window.RECIPES.map((r) => ({
     ...r, key: r.id, kind: 'builtin', img: `img/recipes/${r.id}.webp`, link: `recipe-${r.id}.html`,
     ingredients: [...r.items.map(([id, g]) => `${FOOD[id].name} — ${g} г`), ...(r.extra ? [r.extra] : [])],
-    words: r.items.map(([id]) => FOOD[id].name.toLowerCase()).join(' '),
+    words: [...r.items.map(([id]) => FOOD[id].name), r.extra || ''].join(' ').toLowerCase(),
   }));
+  /* поиск без учёта регистра и «ё»; длинные слова ищем по основе: от 5 букв без последней (курица → куриц…),
+     от 7 букв без двух последних (чечевица → чечеви…) */
+  const stem = (w) => (w.length >= 7 ? w.slice(0, -2) : w.length >= 5 ? w.slice(0, -1) : w);
+  const norm = (s) => String(s).toLowerCase().replace(/ё/g, 'е');
+  const matchesQuery = (r, q) => {
+    const text = norm(r.title + ' ' + r.words);
+    return norm(q).split(/\s+/).filter(Boolean).every((w) => text.includes(w) || text.includes(stem(w)));
+  };
   const lines = (text) => String(text || '').split('\n').map((x) => x.trim()).filter(Boolean);
   const fromUser = (r) => ({
     key: 'u' + r.id, kind: 'user', id: r.id, title: r.title, emoji: MEAL_EMOJI[r.meal] || '🍽', meal: r.meal, time: r.minutes,
@@ -56,9 +64,10 @@
     const matched = recipes.filter((r) =>
       (!meal || r.meal === meal) && (!favOnly || favs.has(r.key)) &&
       [...activeTags].every((t) => r.tags.includes(t)) &&
-      (!q || r.title.toLowerCase().includes(q) || r.words.includes(q)));
+      (!q || matchesQuery(r, q)));
     const hidden = avoid.length && !showAll ? matched.filter((r) => conflicts(r).length) : [];
     const found = matched.filter((r) => !hidden.includes(r));
+    const filtered = Boolean(q || meal || favOnly || activeTags.size);
 
     const note = $('r-prefs-note');
     note.classList.toggle('hidden', !avoid.length);
@@ -87,8 +96,36 @@
         </div>
       </a>`;
     }).join('')
-      : `<div class="card center muted" style="grid-column:1/-1">${favOnly && !favs.size ? 'В избранном пока пусто. Нажмите ♥ на карточке рецепта.' : 'Ничего не нашлось — попробуйте снять фильтры.'}</div>`;
+      : `<div class="card center muted" style="grid-column:1/-1">${favOnly && !favs.size ? 'В избранном пока пусто. Нажмите ♥ на карточке рецепта.' : 'Ничего не нашлось — попробуйте снять фильтры.'}${filtered ? ' <button class="link-btn" type="button" data-reset-filters>Сбросить фильтры</button>' : ''}</div>`;
+
+    // счётчик найденных и сброс фильтров
+    let count = $('r-count');
+    if (!count) {
+      count = document.createElement('p');
+      count.id = 'r-count';
+      count.className = 'small muted r-count';
+      count.setAttribute('aria-live', 'polite');
+      list.before(count);
+    }
+    count.innerHTML = `Найдено рецептов: ${found.length}${filtered ? ' · <button class="link-btn" type="button" data-reset-filters>Сбросить фильтры</button>' : ''}`;
   }
+
+  function resetFilters() {
+    search.value = '';
+    meal = '';
+    favOnly = false;
+    activeTags.clear();
+    mealBox.querySelectorAll('button[data-meal]').forEach((b) => {
+      const on = b.dataset.meal === '';
+      b.classList.toggle('active', on);
+      if (b.hasAttribute('aria-pressed')) b.setAttribute('aria-pressed', String(on));
+    });
+    tagBox.querySelectorAll('.chip').forEach((c) => { c.classList.remove('active'); c.setAttribute('aria-pressed', 'false'); });
+    render();
+  }
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('[data-reset-filters]')) resetFilters();
+  });
 
   function open(key) {
     const r = recipes.find((x) => x.key === key);
@@ -152,6 +189,14 @@
   function close() {
     if (typeof modal.close === 'function') modal.close(); else modal.removeAttribute('open');
   }
+  // после закрытия окна (в том числе по Esc) убираем #рецепт из адреса, чтобы окно не открывалось при перезагрузке
+  modal.addEventListener('close', () => {
+    if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+  });
+  window.addEventListener('hashchange', () => {
+    const key = decodeURIComponent(location.hash.slice(1));
+    if (key) open(key);
+  });
 
   async function toggleFav(key) {
     const on = !favs.has(key);

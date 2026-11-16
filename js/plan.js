@@ -37,13 +37,14 @@
   /* запись дневника из продукта справочника */
   function diaryEntry(foodId, grams, meal, date) {
     const f = FOOD[foodId];
+    const x = f.exact || f; // у рецептов — неокруглённые значения на 100 г
     const k = grams / 100;
     return {
       date, meal, name: f.name, grams,
-      kcal: Math.round(f.kcal * k),
-      protein: +(f.p * k).toFixed(1),
-      fat: +(f.f * k).toFixed(1),
-      carbs: +(f.c * k).toFixed(1),
+      kcal: Math.round(x.kcal * k),
+      protein: +(x.p * k).toFixed(1),
+      fat: +(x.f * k).toFixed(1),
+      carbs: +(x.c * k).toFixed(1),
     };
   }
 

@@ -64,11 +64,13 @@
   function renderHeader() {
     const header = document.getElementById('site-header');
     if (!header) return;
+    // страницы рецептов и статей подсвечивают свой раздел
+    const section = page.startsWith('recipe-') ? 'recipes.html' : page.startsWith('article-') ? 'articles.html' : page;
     const link = ([href, label]) => {
-      const active = href === page ? ' class="active" aria-current="page"' : '';
+      const active = href === page ? ' class="active" aria-current="page"' : href === section ? ' class="active"' : '';
       return `<a href="${href}"${active}>${label}</a>`;
     };
-    const inMore = NAV_MORE.some(([href]) => href === page) || page === 'admin.html';
+    const inMore = NAV_MORE.some(([href]) => href === section);
     const links = NAV.map(link).join('') + `
       <div class="nav-more" id="nav-more">
         <button type="button" class="nav-more-btn${inMore ? ' active' : ''}" aria-expanded="false" aria-controls="nav-more-list">Ещё <span aria-hidden="true">▾</span></button>
@@ -87,6 +89,11 @@
         </div>
         <button class="burger" type="button" aria-label="Открыть меню" aria-expanded="false" aria-controls="nav"><span></span></button>
       </div>`;
+    // затемнение под мобильным меню — в body, вне шапки (у шапки backdrop-filter, внутри неё fixed не растянется на экран)
+    const backdrop = document.createElement('div');
+    backdrop.className = 'nav-backdrop';
+    backdrop.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(backdrop);
 
     if (window.DB && DB.mode === 'demo') {
       const banner = document.createElement('div');
@@ -100,17 +107,45 @@
     const setMore = (open) => { more.classList.toggle('open', open); moreBtn.setAttribute('aria-expanded', String(open)); };
     moreBtn.addEventListener('click', (e) => { e.stopPropagation(); setMore(!more.classList.contains('open')); });
     document.addEventListener('click', (e) => { if (!more.contains(e.target)) setMore(false); });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setMore(false); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !more.classList.contains('open')) return;
+      const inside = more.contains(document.activeElement);
+      setMore(false);
+      if (inside) moreBtn.focus(); // Esc внутри «Ещё» возвращает фокус на кнопку
+    });
+    // фокус с клавиатуры ушёл из «Ещё» — закрываем список
+    more.addEventListener('focusout', (e) => { if (!more.contains(e.relatedTarget)) setMore(false); });
 
     const burger = header.querySelector('.burger');
-    const setOpen = (open) => {
+    const nav = header.querySelector('#nav');
+    const isOpen = () => document.body.classList.contains('menu-open');
+    const navLinks = () => [...nav.querySelectorAll('a')].filter((a) => a.offsetParent !== null);
+    const setOpen = (open, returnFocus = false) => {
       document.body.classList.toggle('menu-open', open);
       burger.setAttribute('aria-expanded', String(open));
       burger.setAttribute('aria-label', open ? 'Закрыть меню' : 'Открыть меню');
+      // при открытии фокус переносим в меню, при закрытии с клавиатуры — возвращаем на бургер
+      if (open) setTimeout(() => navLinks()[0]?.focus({ preventScroll: true }), 50);
+      else if (returnFocus) burger.focus();
     };
-    burger.addEventListener('click', () => setOpen(!document.body.classList.contains('menu-open')));
+    burger.addEventListener('click', () => setOpen(!isOpen()));
     header.querySelectorAll('.nav a').forEach((a) => a.addEventListener('click', () => setOpen(false)));
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setOpen(false); });
+    // тап по затемнению вне меню закрывает меню и не доходит до контента
+    backdrop.addEventListener('click', (e) => { e.preventDefault(); setOpen(false); });
+    document.addEventListener('keydown', (e) => {
+      if (!isOpen()) return;
+      if (e.key === 'Escape') { setOpen(false, true); return; }
+      // Tab ходит по кругу: пункты меню и кнопка-бургер
+      if (e.key === 'Tab') {
+        const items = [...navLinks(), burger];
+        const i = items.indexOf(document.activeElement);
+        const next = e.shiftKey ? (i <= 0 ? items.length - 1 : i - 1) : (i === -1 || i === items.length - 1 ? 0 : i + 1);
+        e.preventDefault();
+        items[next].focus();
+      }
+    });
+    // окно растянули до десктопа — мобильное меню закрываем
+    window.matchMedia('(min-width: 1241px)').addEventListener('change', (e) => { if (e.matches) setOpen(false); });
   }
 
   async function renderAuthState() {

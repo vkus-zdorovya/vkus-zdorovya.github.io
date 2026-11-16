@@ -26,7 +26,14 @@
   }
   goalBox.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-goal]');
-    if (btn) setGoal(btn.dataset.goal);
+    if (!btn) return;
+    setGoal(btn.dataset.goal);
+    // результат уже на экране — сразу пересчитываем под новую цель, чтобы не было противоречия
+    const values = readValues();
+    if (!document.getElementById('calc-result').classList.contains('hidden') && isValid(values)) {
+      store.set('body', { ...values, goal });
+      showResult(values, false);
+    }
   });
 
   /* подставляем данные прошлого расчёта */
@@ -36,6 +43,17 @@
   });
   if (saved.goal) setGoal(saved.goal);
 
+  /* число из поля; экспоненциальную запись (1e2) не принимаем */
+  const num = (v) => (/e/i.test(String(v)) ? NaN : parseFloat(String(v).replace(',', '.')));
+  const readValues = () => ({
+    sex: form.sex.value,
+    age: num(form.age.value),
+    height: num(form.height.value),
+    weight: num(form.weight.value),
+    activity: parseFloat(form.activity.value),
+  });
+  const isValid = (values) => Object.entries(RULES).every(([key, check]) => check(values[key]));
+
   const RULES = {
     sex: (v) => v === 'male' || v === 'female',
     age: (v) => v >= 14 && v <= 100,
@@ -44,26 +62,37 @@
     activity: (v) => v >= 1.2 && v <= 1.9,
   };
 
+  const MESSAGES = {
+    sex: 'выберите пол',
+    age: 'возраст 14–100 лет',
+    height: 'рост 100–250 см',
+    weight: 'вес 25–300 кг',
+    activity: 'выберите уровень активности',
+  };
+
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    const values = {
-      sex: form.sex.value,
-      age: parseFloat(form.age.value),
-      height: parseFloat(form.height.value),
-      weight: parseFloat(form.weight.value),
-      activity: parseFloat(form.activity.value),
-    };
-    let valid = true;
+    const values = readValues();
+    const wrong = [];
     for (const [key, check] of Object.entries(RULES)) {
       const ok = check(values[key]);
       form[key].classList.toggle('invalid', !ok);
-      if (!ok) valid = false;
+      form[key].setAttribute('aria-invalid', String(!ok));
+      if (!ok) wrong.push(key);
     }
-    if (!valid) {
-      errorEl.textContent = 'Проверьте поля: возраст 14–100 лет, рост 100–250 см, вес 25–300 кг';
+    const result = document.getElementById('calc-result');
+    if (wrong.length) {
+      // старый результат не должен оставаться рядом с неверными данными
+      result.classList.add('hidden');
+      result.classList.remove('stale');
+      const metres = wrong.includes('height') && values.height > 0 && values.height < 3;
+      const list = wrong.map((k) => (k === 'height' && metres ? 'рост в сантиметрах, а не в метрах (например, 170)' : MESSAGES[k]));
+      errorEl.textContent = `Проверьте: ${list.join(', ')}`;
+      form[wrong[0]].focus();
       return;
     }
     errorEl.textContent = '';
+    result.classList.remove('stale');
     store.set('body', { ...values, goal });
     const { bmi, kcal } = showResult(values);
     DB.calcs.add({ ...values, goal, bmi: +bmi.toFixed(1), kcal }).catch((err) => console.warn(err));
@@ -75,11 +104,20 @@
     const bmr = 10 * weight + 6.25 * height - 5 * age + (sex === 'male' ? 5 : -161);
     const tdee = bmr * activity;
     const g = GOALS[goal];
-    const kcal = Math.round((tdee * g.factor) / 10) * 10;
-    const protein = Math.round(weight * g.protein);
-    const fat = Math.round((kcal * 0.3) / 9);
-    const carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4));
-    const waterL = Math.round(weight * 0.03 * 10) / 10;
+    // при ИМТ ниже нормы дефицит не считаем, а норму для похудения не опускаем ниже безопасного минимума
+    // (1200 ккал женщинам, 1500 мужчинам — как в статье о калориях), но и не выше поддержания
+    const underweight = cat.key === 'severe' || cat.key === 'under';
+    const noDeficit = goal === 'lose' && underweight;
+    const minKcal = sex === 'male' ? 1500 : 1200;
+    let kcal = Math.round((tdee * (noDeficit ? 1 : g.factor)) / 10) * 10;
+    const floored = goal === 'lose' && !noDeficit && kcal < minKcal;
+    if (floored) kcal = Math.round(Math.min(minKcal, tdee) / 10) * 10;
+    // белок не больше 35% калорий, иначе на крайних входах БЖУ не сходится с нормой
+    const protein = Math.min(Math.round(weight * g.protein), Math.floor((kcal * 0.35) / 4));
+    // округляем вниз, чтобы сумма Б·4 + Ж·9 + У·4 не превышала норму
+    const fat = Math.floor((kcal * 0.3) / 9);
+    const carbs = Math.max(0, Math.floor((kcal - protein * 4 - fat * 9) / 4));
+    const waterL = Math.round((weight * 3) / 10) / 10;
     const glasses = Math.ceil((waterL * 1000) / 250);
     const minW = 18.5 * (height / 100) ** 2;
     const maxW = 24.9 * (height / 100) ** 2;
@@ -89,9 +127,14 @@
     label.textContent = cat.label;
     label.style.color = cat.color;
     document.getElementById('r-kcal').textContent = kcal.toLocaleString('ru-RU');
-    document.getElementById('r-tdee').textContent = `Для ${g.label}. Поддержание: ${Math.round(tdee).toLocaleString('ru-RU')} ккал`;
-    document.getElementById('r-water').textContent = waterL.toLocaleString('ru-RU');
-    document.getElementById('r-glasses').textContent = `≈ ${glasses} стаканов по 250 мл`;
+    const tdeeText = `Поддержание: ${Math.round(tdee).toLocaleString('ru-RU')} ккал`;
+    document.getElementById('r-tdee').textContent = noDeficit
+      ? `ИМТ ниже нормы — дефицит не применяется. ${tdeeText}`
+      : floored
+        ? `Для ${g.label}, не ниже безопасного минимума. ${tdeeText}`
+        : `Для ${g.label}. ${tdeeText}`;
+    document.getElementById('r-water').textContent = waterL.toLocaleString('ru-RU', { minimumFractionDigits: 1 });
+    document.getElementById('r-glasses').textContent = `≈ ${glasses} ${glassWord(glasses)} по 250 мл`;
     document.getElementById('r-ideal').textContent =
       `Нормальный вес при вашем росте: ${minW.toFixed(0)}–${maxW.toFixed(0)} кг`;
 
@@ -101,8 +144,10 @@
     /* шкала ИМТ: от 15 до 40 */
     const pos = Math.min(100, Math.max(0, ((bmi - 15) / 25) * 100));
     const marker = document.getElementById('bmi-marker');
-    marker.style.left = '0%';
-    requestAnimationFrame(() => requestAnimationFrame(() => { marker.style.left = pos + '%'; }));
+    // маркер шириной 28 px не выходит за края шкалы
+    const at = (p) => `clamp(14px, ${p}%, calc(100% - 14px))`;
+    marker.style.left = at(0);
+    requestAnimationFrame(() => requestAnimationFrame(() => { marker.style.left = at(pos); }));
 
     const macros = [
       ['Белки', protein, '#3c8a3f', protein * 4],
@@ -120,7 +165,9 @@
       bars.querySelectorAll('.macro-fill').forEach((el) => { el.style.width = el.dataset.w + '%'; });
     }));
 
-    document.getElementById('tips').innerHTML = buildTips(cat.key, goal, waterL).map((t) => `<li>${esc(t)}</li>`).join('');
+    const tips = buildTips(cat.key, goal, waterL);
+    if (floored) tips.unshift(`Норма поднята до ${kcal.toLocaleString('ru-RU')} ккал: есть меньше ${minKcal} ккал в день без врача не рекомендуется. Лучше добавьте активности.`);
+    document.getElementById('tips').innerHTML = tips.map((t) => `<li>${esc(t)}</li>`).join('');
 
     store.set('target', { kcal, goal, protein, fat, carbs });
     document.getElementById('to-diet').textContent = `Собрать рацион на ${kcal.toLocaleString('ru-RU')} ккал`;
@@ -153,9 +200,18 @@
     return tips;
   }
 
-  /* трекер воды на сегодня */
+  /* «стакан», «стакана», «стаканов» */
+  function glassWord(n) {
+    const a = n % 10, b = n % 100;
+    if (a === 1 && b !== 11) return 'стакан';
+    if (a >= 2 && a <= 4 && (b < 12 || b > 14)) return 'стакана';
+    return 'стаканов';
+  }
+
+  /* трекер воды на сегодня; дата — по местному времени, чтобы сброс был в местную полночь */
   function renderWater(total) {
-    const today = new Date().toISOString().slice(0, 10);
+    const d = new Date();
+    const today = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
     const log = store.get('water', {});
     let drunk = log.date === today ? log.count : 0;
     const box = document.getElementById('glasses');
@@ -164,7 +220,7 @@
     const draw = () => {
       box.innerHTML = Array.from({ length: total }, (_, i) =>
         `<button type="button" class="glass${i < drunk ? ' full' : ''}" data-i="${i}" aria-label="Стакан ${i + 1}"></button>`).join('');
-      count.textContent = drunk >= total ? '🎉 Норма воды на сегодня выполнена!' : `${drunk} из ${total} стаканов`;
+      count.textContent = drunk >= total ? '🎉 Норма воды на сегодня выполнена!' : `${drunk} из ${total} ${total % 10 === 1 && total % 100 !== 11 ? 'стакана' : 'стаканов'}`;
     };
     box.onclick = (e) => {
       const btn = e.target.closest('.glass');
@@ -178,7 +234,13 @@
   }
 
   // пользователь уже считал — сразу показываем результат без прокрутки
-  if (Object.entries(RULES).every(([key, check]) => check(saved[key]))) showResult(saved, false);
+  if (isValid(saved)) showResult(saved, false);
+
+  // данные изменили, а «Рассчитать» не нажали — помечаем результат как устаревший
+  form.addEventListener('input', (e) => {
+    if (e.target.closest('#goal')) return;
+    document.getElementById('calc-result').classList.add('stale');
+  });
 
   /* ===================== Сравнение продуктов ===================== */
 
@@ -207,7 +269,7 @@
         : `${diff > 0 ? '+' : '−'}${fmt(Math.abs(diff))} ${m.unit}`;
       return `
         <div>
-          <div class="cmp-metric-head"><span>${m.label}</span><span class="diff" style="color:${diff === 0 ? 'var(--muted)' : better ? 'var(--green-700)' : 'var(--danger)'}">${diffText}</span></div>
+          <div class="cmp-metric-head"><span>${m.label}</span><span class="diff" style="color:${diff === 0 ? 'var(--muted)' : better ? 'var(--accent-text)' : 'var(--danger-text)'}">${diffText}</span></div>
           <div class="cmp-bar">
             <div class="cmp-line"><div class="cmp-track"><div class="cmp-fill bad" data-w="${(a / max) * 100}"></div></div><span>${fmt(a)} ${m.unit}</span></div>
             <div class="cmp-line"><div class="cmp-track"><div class="cmp-fill good" data-w="${(b / max) * 100}"></div></div><span>${fmt(b)} ${m.unit}</span></div>
@@ -226,7 +288,8 @@
   }
 
   function fmt(n) {
-    return Number.isInteger(n) ? n.toLocaleString('ru-RU') : n.toLocaleString('ru-RU', { maximumFractionDigits: 1 });
+    // малые значения (соль 0,03 г) показываем с двумя знаками, чтобы не выходило «0 г» и «−0 г»
+    return Number.isInteger(n) ? n.toLocaleString('ru-RU') : n.toLocaleString('ru-RU', { maximumFractionDigits: Math.abs(n) < 0.1 ? 2 : 1 });
   }
 
   select.addEventListener('change', () => showSwap(select.value));

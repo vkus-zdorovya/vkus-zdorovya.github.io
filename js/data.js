@@ -251,13 +251,13 @@ window.SWAP_METRICS = [
 
 /* Категории ИМТ по классификации ВОЗ */
 window.BMI_CATEGORIES = [
-  { max: 16, key: 'severe', label: 'Выраженный дефицит массы тела', color: '#3d7fc4' },
-  { max: 18.5, key: 'under', label: 'Недостаточная масса тела', color: '#3d7fc4' },
-  { max: 25, key: 'normal', label: 'Нормальная масса тела', color: '#3c8a3f' },
-  { max: 30, key: 'over', label: 'Избыточная масса тела', color: '#b98a00' },
-  { max: 35, key: 'obese1', label: 'Ожирение I степени', color: '#d9701f' },
-  { max: 40, key: 'obese2', label: 'Ожирение II степени', color: '#d9483b' },
-  { max: Infinity, key: 'obese3', label: 'Ожирение III степени', color: '#b5281c' },
+  { max: 16, key: 'severe', label: 'Выраженный дефицит массы тела', color: 'var(--bmi-under)' },
+  { max: 18.5, key: 'under', label: 'Недостаточная масса тела', color: 'var(--bmi-under)' },
+  { max: 25, key: 'normal', label: 'Нормальная масса тела', color: 'var(--bmi-normal)' },
+  { max: 30, key: 'over', label: 'Избыточная масса тела', color: 'var(--bmi-over)' },
+  { max: 35, key: 'obese1', label: 'Ожирение I степени', color: 'var(--bmi-obese1)' },
+  { max: 40, key: 'obese2', label: 'Ожирение II степени', color: 'var(--bmi-obese2)' },
+  { max: Infinity, key: 'obese3', label: 'Ожирение III степени', color: 'var(--bmi-obese3)' },
 ];
 
 /* ИМТ везде показывается с одним знаком после запятой — по этому же числу определяем категорию,
@@ -292,7 +292,8 @@ window.FOOD_BUY = {
   beef: ['Говядина постная', 1.4],
   salmon: ['Лосось (филе)', 1.2],
   cod: ['Треска (филе)', 1.2],
-  syrniki: ['Творог 5% (для сырников)', 0.85],
+  syrniki: ['Творог 5%', 0.85],
+  broccoli: ['Брокколи', 1],
   salad: ['Свежие овощи для салата', 1],
   vegstew: ['Овощи для рагу (кабачок, перец, морковь)', 1.1],
   borsch: ['Овощи для борща (свёкла, капуста, морковь)', 0.5],

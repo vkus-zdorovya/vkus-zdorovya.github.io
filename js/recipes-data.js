@@ -132,16 +132,20 @@ window.RECIPES = [
     if (r.time <= 15) r.tags.push('quick');
 
     const k = 100 / sum.g;
+    // если название рецепта совпадает с продуктом справочника, помечаем его, чтобы в списках не было двух одинаковых пунктов
+    const sameName = window.FOODS.some((f) => !f.recipe && f.name === r.title);
     window.FOODS.push({
       id: 'r_' + r.id,
       cat: 'Рецепты',
-      name: r.title,
+      name: sameName ? `${r.title} (рецепт)` : r.title,
       kcal: Math.round(sum.kcal * k),
       p: +(sum.p * k).toFixed(1),
       f: +(sum.f * k).toFixed(1),
       c: +(sum.c * k).toFixed(1),
       portion: sum.g,
       recipe: r.id,
+      // точные значения на 100 г: по ним считаются дневник и рацион, чтобы порция давала ровно r.total
+      exact: { kcal: sum.kcal * k, p: sum.p * k, f: sum.f * k, c: sum.c * k },
     });
   });
 })();
